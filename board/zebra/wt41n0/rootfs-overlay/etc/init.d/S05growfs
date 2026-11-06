@@ -1,0 +1,13 @@
+#!/bin/sh
+# On the eMMC system, grow the root file system to fill its partition. The root
+# file system image is smaller than the partition; this runs once per install (when
+# the file system already fills the partition it does nothing).
+case "$1" in
+start)
+	grep -q '^/dev/mmcblk1p1 / ' /proc/mounts || exit 0	# only on the eMMC system
+	printf 'Growing the root file system: '
+	if out=$(wt41n0-growfs / 2>&1); then echo "OK (${out#*: })"; else echo "FAIL ($out)"; fi
+	;;
+stop) ;;
+*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

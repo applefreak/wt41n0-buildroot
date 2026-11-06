@@ -11,8 +11,8 @@ Upstream: not submitted
 ---
  drivers/leds/Kconfig          |   6 ++
  drivers/leds/Makefile         |   1 +
- drivers/leds/leds-wt41n0-ea.c | 123 ++++++++++++++++++++++++++++++++++
- 3 files changed, 130 insertions(+)
+ drivers/leds/leds-wt41n0-ea.c | 127 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 134 insertions(+)
  create mode 100644 drivers/leds/leds-wt41n0-ea.c
 
 diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
@@ -41,10 +41,10 @@ index 18afbb5a2..69bf8a399 100644
 +obj-$(CONFIG_LEDS_WT41N0_EA)		+= leds-wt41n0-ea.o
 diff --git a/drivers/leds/leds-wt41n0-ea.c b/drivers/leds/leds-wt41n0-ea.c
 new file mode 100644
-index 000000000..d9f664dde
+index 000000000..f3a8b4b08
 --- /dev/null
 +++ b/drivers/leds/leds-wt41n0-ea.c
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,127 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Zebra WT41N0 "External Agent" microcontroller (Atmel XMEGA) on I2C4 at 0x42.
@@ -71,6 +71,10 @@ index 000000000..d9f664dde
 +	u8 colour;		/* bi-colour LED only: 1 red, 2 green */
 +};
 +
++/*
++ * While a charge path is switched on, the EA itself shows the charge LED (registers
++ * 0x21/0x22, set by the battery driver) on the middle LED.
++ */
 +static const struct { const char *name; u8 reg; u8 colour; } ea_leds[] = {
 +	{ "wt41n0:led1",         0x10, 0 },
 +	{ "wt41n0:green:right",  0x12, 0 },

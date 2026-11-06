@@ -60,6 +60,20 @@ The default image is about 11 MB. A root filesystem on eMMC is the way past this
 kernel command line into the device tree, and `mkhex.py` refuses to build an image
 whose device tree does not match.
 
+## RAM system and eMMC system
+
+Both boot the same way up to the kernel, with the same root file system in the
+initramfs:
+
+- **RAM system** (`wt41n0-linux.hex`): runs from the initramfs.
+- **eMMC system** (`wt41n0-emmc.hex`): its initramfs `/init` (`emmc-init`) mounts the
+  ext4 root at `/dev/mmcblk1p1` and switches to it; otherwise it stays in the RAM
+  system as the recovery system. The eMMC has no partition table Linux could read;
+  `blkdevparts=mmcblk1:1687M@201M(rootfs)` on the command line defines the partition.
+
+A running system can install either image into the OS area itself (`wt41n0-update`),
+which is what download mode does too.
+
 ## What Linux inherits
 
 The kernel relies on state the stock boot chain leaves behind, and the device tree is

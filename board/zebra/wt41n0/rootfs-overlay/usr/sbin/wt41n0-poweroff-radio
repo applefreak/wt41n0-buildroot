@@ -1,0 +1,8 @@
+#!/bin/sh
+# Last shutdown step: switch the TI WL1283 off (Wi-Fi enable GPIO 100, Bluetooth
+# enable GPIO 103) before a reboot. A warm reboot does not reset the chip; without
+# this it comes back with Wi-Fi unable to transmit ("Tx stuck (in FW)").
+# The lines belong to their drivers, so they are cleared directly in the OMAP GPIO4
+# block (CLEARDATAOUT, 0x48059190; GPIO 100 = bit 4, GPIO 103 = bit 7).
+devmem 0x48059190 32 0x90
+usleep 200000

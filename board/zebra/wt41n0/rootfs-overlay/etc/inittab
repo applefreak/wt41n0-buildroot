@@ -25,3 +25,4 @@ tty1::respawn:-/bin/sh
 # Shutdown
 ::shutdown:/etc/init.d/rcK
 ::shutdown:/bin/umount -a -r
+::shutdown:/usr/sbin/wt41n0-poweroff-radio

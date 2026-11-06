@@ -1,0 +1,586 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 08:50:21 +0000
+Subject: [PATCH] power: supply: add a battery and charger driver for the Zebra
+ WT41N0
+
+The WT41N0 charges its battery with the TWL6030's own charger; nothing in the
+kernel enables it, so the battery never charges. Do what the stock OS does:
+switch the charger's input with the External Agent's charge path "fuses" (the
+cradle supply or USB VBUS), program and enable the charger (4.2 V; 700 mA from
+the cradle, 500 mA from USB), keep its watchdog fed and its settings in place,
+and stop when no power source is present, the battery is missing, or its
+temperature is outside 0-45 C.
+
+Battery presence, temperature, charge current and the cradle power state come
+from the External Agent microcontroller, the battery voltage from the PMIC ADC.
+Charging, full and fault states are reported as a power supply; while
+charging, the EA's charge LED (the middle LED) blinks orange, as in the stock
+OS.
+
+Upstream: not submitted
+---
+ drivers/power/supply/Kconfig          |   8 +
+ drivers/power/supply/Makefile         |   1 +
+ drivers/power/supply/wt41n0-battery.c | 521 ++++++++++++++++++++++++++
+ 3 files changed, 530 insertions(+)
+ create mode 100644 drivers/power/supply/wt41n0-battery.c
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index bcfa63fb9..f97a0323e 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -487,6 +487,14 @@ config CHARGER_MAX8903
+ 	  pins based on the status of charger connections with interrupt
+ 	  handlers.
+ 
++config BATTERY_WT41N0
++	tristate "Zebra WT41N0 battery and charger"
++	depends on TWL4030_CORE && I2C && OF && IIO
++	help
++	  Battery and charger support for the Zebra WT41N0: charges the battery with
++	  the TWL6030's charger and reports the battery and power sources through
++	  the External Agent microcontroller and the PMIC ADC.
++
+ config CHARGER_TWL4030
+ 	tristate "OMAP TWL4030 BCI charger driver"
+ 	depends on IIO && TWL4030_CORE
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 8dcb41545..756458202 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -69,6 +69,7 @@ obj-$(CONFIG_CHARGER_CPCAP)	+= cpcap-charger.o
+ obj-$(CONFIG_CHARGER_ISP1704)	+= isp1704_charger.o
+ obj-$(CONFIG_CHARGER_MAX8903)	+= max8903_charger.o
+ obj-$(CONFIG_CHARGER_TWL4030)	+= twl4030_charger.o
++obj-$(CONFIG_BATTERY_WT41N0)	+= wt41n0-battery.o
+ obj-$(CONFIG_CHARGER_LP8727)	+= lp8727_charger.o
+ obj-$(CONFIG_CHARGER_LP8788)	+= lp8788-charger.o
+ obj-$(CONFIG_CHARGER_GPIO)	+= gpio-charger.o
+diff --git a/drivers/power/supply/wt41n0-battery.c b/drivers/power/supply/wt41n0-battery.c
+new file mode 100644
+index 000000000..c0247eff9
+--- /dev/null
++++ b/drivers/power/supply/wt41n0-battery.c
+@@ -0,0 +1,521 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Zebra WT41N0 battery and charger.
++ *
++ * The battery is charged by the TWL6030's own charger (registers 0xE0-0xF2 on the
++ * PMIC's second I2C address), programmed the way the stock OS does it. The External
++ * Agent microcontroller (I2C4 0x42) switches the charger's input: its "AC fuse"
++ * connects the cradle's supply, its "USB fuse" the USB VBUS. It also reports the power
++ * sources, battery presence, temperature and charge current, stops charging by itself
++ * on over-temperature or over-current, and shows the charge LED while a fuse is on. The battery voltage comes from the PMIC's ADC: input GPADC_IN3 behind
++ * a 4.0923:1 divider (the stock OS's factor). That input reads 0 while external power
++ * is present, so the last reading taken on battery is reported then.
++ *
++ * Every POLL_MS the driver re-evaluates whether the charger should run and refreshes
++ * the charger watchdog; if this driver stops, the PMIC stops charging on its own.
++ */
++#include <linux/delay.h>
++#include <linux/i2c.h>
++#include <linux/iio/consumer.h>
++#include <linux/mfd/twl.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/power_supply.h>
++#include <linux/workqueue.h>
++
++#define POLL_MS			20000
++#define RESTART_MS		60000	/* minimum time between charger restarts */
++#define STUCK_MA		30	/* below this with ANTICOLLAPSE set: restart */
++#define STUCK_MAX_MV		4100
++#define VBAT_DIVIDER_X10000	40923
++
++/* TWL6030 charger registers, as offsets from TWL6030_BASEADD_CHARGER (0xE0) */
++#define CONTROLLER_INT_MASK	0x00
++#define CONTROLLER_CTRL1	0x01
++#define   EN_CHARGER		BIT(4)
++#define CONTROLLER_WDG		0x02
++#define CONTROLLER_STAT1	0x03
++#define   VBUS_DET		BIT(2)
++#define CHARGERUSB_INT_MASK	0x05
++#define CHARGERUSB_STATUS_INT1	0x06
++#define CHARGERUSB_STATUS_INT2	0x07
++#define   ANTICOLLAPSE		BIT(0)	/* input voltage sagging, current throttled */
++#define   CHARGE_DONE		BIT(1)
++#define   CURRENT_TERM		BIT(2)	/* below the termination current */
++#define CHARGERUSB_CTRL1	0x08
++#define CHARGERUSB_CTRL2	0x09
++#define CHARGERUSB_VOREG	0x0C
++#define CHARGERUSB_VICHRG	0x0D
++#define CHARGERUSB_CINLIMIT	0x0E
++#define CHARGERUSB_CTRLLIMIT1	0x0F
++#define CHARGERUSB_CTRLLIMIT2	0x10
++
++#define VOREG_4200MV		((4200 - 3500) / 20)
++#define VICHRG_500MA		0x04
++#define VICHRG_700MA		0x06
++#define CINLIMIT_500MA		0x09
++#define CINLIMIT_NONE		0x0F
++
++/* External Agent registers */
++#define EA_POWER_SOURCE		0x23	/* bit 1: cradle power present */
++#define   EA_AC_PRESENT		BIT(1)
++#define EA_BATT_STATUS		0x30	/* bit 7: battery present */
++#define   EA_BATT_PRESENT	BIT(7)
++#define   EA_BATT_OVERCURRENT	BIT(5)
++#define   EA_BATT_TEMP_ALERT	BIT(4)
++#define EA_BATT_TEMP		0x31	/* signed degrees C, 0x80 = unknown */
++#define EA_CHARGE_CURRENT	0x34	/* 16-bit little endian, mA */
++#define EA_FET			0x04	/* charge path "fuses" */
++#define   EA_FUSE_AC		BIT(0)	/* cradle supply */
++#define   EA_FUSE_USB		BIT(1)	/* USB VBUS */
++#define   EA_FUSE_MASK		(EA_FUSE_AC | EA_FUSE_USB | BIT(2))
++#define EA_MAX_CURRENT		0x36	/* 16-bit little endian, mA; over it the EA stops */
++#define EA_CHARGE_LED_COLOUR	0x21
++#define EA_CHARGE_LED_PATTERN	0x22
++#define   CHARGE_LED_ORANGE	0x0c
++#define   CHARGE_LED_BLINK	0xaa	/* the stock OS's fast blink */
++#define EA_MIDDLE_LED_COLOUR	0x16	/* the bi-colour LED itself */
++#define EA_MIDDLE_LED_PATTERN	0x17
++#define EA_MIDDLE_LED_DURATION	0x18
++#define EA_LIMIT_MA		1000
++
++/* Charge only between these battery temperatures (the EA enforces -3..48 C itself) */
++#define TEMP_MIN_C		0
++#define TEMP_MAX_C		45
++
++struct wt41n0_battery {
++	struct device *dev;
++	struct i2c_client *ea;
++	struct iio_channel *vbat;
++	struct power_supply *battery, *ac, *usb;
++	struct delayed_work work;
++	struct mutex lock;		/* protects the state below */
++	bool ac_online, usb_online, present, charging, full, fault;
++	int temp_c;			/* INT_MIN when unknown */
++	int current_ma;
++	int vbat_mv;			/* last valid battery voltage, 0 when unknown */
++	unsigned long restarted;	/* jiffies of the last charger restart */
++};
++
++static void read_vbat(struct wt41n0_battery *b)
++{
++	int mv;
++
++	if (iio_read_channel_processed(b->vbat, &mv) >= 0 && mv > 0)
++		b->vbat_mv = mv * VBAT_DIVIDER_X10000 / 10000;
++}
++
++static int chg_write(u8 reg, u8 val)
++{
++	return twl_i2c_write_u8(TWL_MODULE_MAIN_CHARGE, val, reg);
++}
++
++static int chg_read(u8 reg, u8 *val)
++{
++	return twl_i2c_read_u8(TWL_MODULE_MAIN_CHARGE, val, reg);
++}
++
++/*
++ * Charge settings, as the stock OS uses them: 700 mA with no input limit from the
++ * cradle (through the EA's AC fuse), 500 mA with a 500 mA input limit from USB. The
++ * PMIC resets VOREG, VICHRG and CINLIMIT whenever EN_CHARGER is cleared, so they are
++ * written after enabling and checked on every poll.
++ */
++static void charger_settings(bool ac, u8 settings[4][2])
++{
++	u8 s[4][2] = {
++		{ CHARGERUSB_VOREG, VOREG_4200MV },
++		{ CHARGERUSB_VICHRG, ac ? VICHRG_700MA : VICHRG_500MA },
++		{ CHARGERUSB_CINLIMIT, ac ? CINLIMIT_NONE : CINLIMIT_500MA },
++		{ CHARGERUSB_CTRL2, 0x20 },		/* termination at 100 mA */
++	};
++
++	memcpy(settings, s, sizeof(s));
++}
++
++static int charger_apply_settings(bool ac)
++{
++	u8 s[4][2];
++	int i, ret = 0;
++
++	charger_settings(ac, s);
++	for (i = 0; !ret && i < ARRAY_SIZE(s); i++)
++		ret = chg_write(s[i][0], s[i][1]);
++	return ret;
++}
++
++static bool charger_settings_ok(bool ac)
++{
++	u8 s[4][2], v;
++	int i;
++
++	charger_settings(ac, s);
++	for (i = 0; i < ARRAY_SIZE(s); i++)
++		if (chg_read(s[i][0], &v) || v != s[i][1])
++			return false;
++	return true;
++}
++
++/* Switch the EA's charge path fuses (read-modify-write, like the stock OS) */
++static int ea_set_fuses(struct wt41n0_battery *b, u8 fuses)
++{
++	int v = i2c_smbus_read_byte_data(b->ea, EA_FET);
++
++	if (v < 0)
++		return v;
++	if ((v & EA_FUSE_MASK) == fuses)
++		return 0;
++	return i2c_smbus_write_byte_data(b->ea, EA_FET, (v & ~EA_FUSE_MASK) | fuses);
++}
++
++/*
++ * The EA copies its charge LED settings onto the middle LED only when a fuse is
++ * switched on, so set both: the charge LED registers for the EA, and the middle LED
++ * itself for the current state.
++ */
++static void ea_charge_led(struct wt41n0_battery *b, bool blink)
++{
++	u8 pattern = blink ? CHARGE_LED_BLINK : 0;
++
++	i2c_smbus_write_byte_data(b->ea, EA_CHARGE_LED_COLOUR, CHARGE_LED_ORANGE);
++	i2c_smbus_write_byte_data(b->ea, EA_CHARGE_LED_PATTERN, pattern);
++	i2c_smbus_write_byte_data(b->ea, EA_MIDDLE_LED_DURATION, 0xff);
++	i2c_smbus_write_byte_data(b->ea, EA_MIDDLE_LED_COLOUR, CHARGE_LED_ORANGE);
++	i2c_smbus_write_byte_data(b->ea, EA_MIDDLE_LED_PATTERN, pattern);
++}
++
++static int charger_enable(struct wt41n0_battery *b, bool ac)
++{
++	int ret;
++
++	/* Charge LED first: the EA applies it when the fuse switches on */
++	ea_charge_led(b, true);
++	/* Connect the charger's input first, so the supply is there when it starts */
++	ret = ea_set_fuses(b, ac ? EA_FUSE_AC : EA_FUSE_USB);
++	if (!ret) {
++		i2c_smbus_write_byte_data(b->ea, EA_MAX_CURRENT, EA_LIMIT_MA & 0xff);
++		i2c_smbus_write_byte_data(b->ea, EA_MAX_CURRENT + 1, EA_LIMIT_MA >> 8);
++		msleep(100);
++		/*
++		 * The PMIC keeps EN_CHARGER across a reboot; start from "off" so that
++		 * enabling is a real off-to-on transition.
++		 */
++		ret = chg_write(CONTROLLER_CTRL1, 0);
++	}
++	if (!ret)
++		ret = chg_write(CHARGERUSB_CTRLLIMIT1, 0x35);	/* VOREG ceiling */
++	if (!ret)
++		ret = chg_write(CHARGERUSB_CTRLLIMIT2, 0x0e);	/* VICHRG ceiling */
++	if (!ret)
++		ret = chg_write(CONTROLLER_INT_MASK, 0x76);
++	if (!ret)
++		ret = chg_write(CHARGERUSB_INT_MASK, 0xf8);
++	if (!ret)
++		ret = chg_write(CONTROLLER_WDG, 0xff);
++	if (!ret)
++		ret = chg_write(CONTROLLER_CTRL1, EN_CHARGER);
++	if (!ret)
++		ret = charger_apply_settings(ac);
++	if (ret)
++		dev_err(b->dev, "cannot enable the charger: %d\n", ret);
++	else
++		dev_dbg(b->dev, "charging from %s\n", ac ? "the cradle" : "USB");
++	return ret;
++}
++
++static void charger_disable(struct wt41n0_battery *b)
++{
++	u8 v;
++
++	if (!chg_read(CONTROLLER_CTRL1, &v))
++		chg_write(CONTROLLER_CTRL1, v & ~EN_CHARGER);
++	chg_write(CHARGERUSB_INT_MASK, 0x0f);
++	chg_write(CONTROLLER_INT_MASK, 0xfe);
++	ea_set_fuses(b, 0);
++	ea_charge_led(b, false);
++}
++
++static void wt41n0_battery_update(struct wt41n0_battery *b)
++{
++	bool was_charging = b->charging, was_full = b->full, was_ac = b->ac_online,
++	     was_usb = b->usb_online, want;
++	int src, st, t, lo, hi;
++	u8 stat1 = 0, int1 = 0, int2 = 0;
++
++	/* Reading these EA registers acknowledges their EA interrupt bits; the EA
++	 * interrupt is not used. */
++	src = i2c_smbus_read_byte_data(b->ea, EA_POWER_SOURCE);
++	st = i2c_smbus_read_byte_data(b->ea, EA_BATT_STATUS);
++	t = i2c_smbus_read_byte_data(b->ea, EA_BATT_TEMP);
++	lo = i2c_smbus_read_byte_data(b->ea, EA_CHARGE_CURRENT);
++	hi = i2c_smbus_read_byte_data(b->ea, EA_CHARGE_CURRENT + 1);
++	chg_read(CONTROLLER_STAT1, &stat1);
++
++	mutex_lock(&b->lock);
++	b->ac_online = src >= 0 && (src & EA_AC_PRESENT);
++	b->usb_online = !b->ac_online && (stat1 & VBUS_DET);
++	b->present = st >= 0 && (st & EA_BATT_PRESENT);
++	b->temp_c = (t < 0 || t == 0x80) ? INT_MIN : (s8)t;
++	b->current_ma = (lo < 0 || hi < 0) ? 0 : lo | hi << 8;
++	b->fault = st >= 0 && (st & (EA_BATT_OVERCURRENT | EA_BATT_TEMP_ALERT));
++	read_vbat(b);
++
++	want = (b->ac_online || b->usb_online) && b->present && !b->fault &&
++	       b->temp_c != INT_MIN && b->temp_c >= TEMP_MIN_C && b->temp_c <= TEMP_MAX_C;
++
++	if (want && (!b->charging || b->ac_online != was_ac || b->usb_online != was_usb))
++		b->charging = !charger_enable(b, b->ac_online);
++	else if (!want && b->charging) {
++		charger_disable(b);
++		b->charging = false;
++	}
++
++	b->full = false;
++	if (b->charging) {
++		chg_write(CONTROLLER_WDG, 0xff);	/* keep the charger watchdog fed */
++		if (!charger_settings_ok(b->ac_online))
++			charger_apply_settings(b->ac_online);
++		chg_read(CHARGERUSB_STATUS_INT1, &int1);
++		chg_read(CHARGERUSB_STATUS_INT2, &int2);
++		b->full = int2 & CHARGE_DONE;
++		if (int1)
++			dev_warn(b->dev, "charger fault status 0x%02x\n", int1);
++		/*
++		 * The charger can stay throttled by its input anti-collapse loop with
++		 * almost no current; switching it off and on again recovers it.
++		 */
++		if ((int2 & ANTICOLLAPSE) && !b->full && b->current_ma < STUCK_MA &&
++		    b->vbat_mv && b->vbat_mv < STUCK_MAX_MV &&
++		    time_after(jiffies, b->restarted + msecs_to_jiffies(RESTART_MS))) {
++			dev_dbg(b->dev, "charger throttled at %d mA, restarting it\n",
++				b->current_ma);
++			b->restarted = jiffies;
++			b->charging = !charger_enable(b, b->ac_online);
++		}
++	}
++	mutex_unlock(&b->lock);
++
++	if (b->charging != was_charging || b->full != was_full) {
++		ea_charge_led(b, b->charging && !b->full);
++		power_supply_changed(b->battery);
++	}
++	if (b->ac_online != was_ac)
++		power_supply_changed(b->ac);
++	if (b->usb_online != was_usb)
++		power_supply_changed(b->usb);
++}
++
++static void wt41n0_battery_work(struct work_struct *work)
++{
++	struct wt41n0_battery *b = container_of(work, struct wt41n0_battery, work.work);
++
++	wt41n0_battery_update(b);
++	schedule_delayed_work(&b->work, msecs_to_jiffies(POLL_MS));
++}
++
++/* Rough open-circuit voltage to state of charge for a 1-cell Li-ion battery (mV, %) */
++static const int ocv_table[][2] = {
++	{ 4150, 100 }, { 4050, 90 }, { 3970, 80 }, { 3900, 70 }, { 3840, 60 },
++	{ 3790, 50 }, { 3760, 40 }, { 3730, 30 }, { 3690, 20 }, { 3620, 10 }, { 3400, 0 },
++};
++
++static int capacity_from_mv(int mv)
++{
++	int i;
++
++	if (mv >= ocv_table[0][0])
++		return 100;
++	for (i = 1; i < ARRAY_SIZE(ocv_table); i++) {
++		int v1 = ocv_table[i - 1][0], c1 = ocv_table[i - 1][1];
++		int v0 = ocv_table[i][0], c0 = ocv_table[i][1];
++
++		if (mv >= v0)
++			return c0 + (c1 - c0) * (mv - v0) / (v1 - v0);
++	}
++	return 0;
++}
++
++static enum power_supply_property battery_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_HEALTH,
++	POWER_SUPPLY_PROP_TECHNOLOGY,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_TEMP,
++};
++
++static int battery_get(struct power_supply *psy, enum power_supply_property psp,
++		       union power_supply_propval *val)
++{
++	struct wt41n0_battery *b = power_supply_get_drvdata(psy);
++	int ret = 0;
++
++	mutex_lock(&b->lock);
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		if (b->full)
++			val->intval = POWER_SUPPLY_STATUS_FULL;
++		else if (b->charging)
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		else if (b->ac_online || b->usb_online)
++			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		else
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		break;
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = b->present;
++		break;
++	case POWER_SUPPLY_PROP_HEALTH:
++		val->intval = b->fault ? POWER_SUPPLY_HEALTH_UNSPEC_FAILURE :
++			      POWER_SUPPLY_HEALTH_GOOD;
++		break;
++	case POWER_SUPPLY_PROP_TECHNOLOGY:
++		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
++		break;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++	case POWER_SUPPLY_PROP_CAPACITY:
++		read_vbat(b);
++		if (!b->vbat_mv)
++			ret = -ENODATA;
++		else if (psp == POWER_SUPPLY_PROP_CAPACITY)
++			val->intval = capacity_from_mv(b->vbat_mv);
++		else
++			val->intval = b->vbat_mv * 1000;
++		break;
++	case POWER_SUPPLY_PROP_CURRENT_NOW:
++		val->intval = b->current_ma * 1000;
++		break;
++	case POWER_SUPPLY_PROP_TEMP:
++		if (b->temp_c == INT_MIN)
++			ret = -ENODATA;
++		else
++			val->intval = b->temp_c * 10;
++		break;
++	default:
++		ret = -EINVAL;
++	}
++	mutex_unlock(&b->lock);
++	return ret;
++}
++
++static enum power_supply_property online_props[] = { POWER_SUPPLY_PROP_ONLINE };
++
++static int online_get(struct power_supply *psy, enum power_supply_property psp,
++		      union power_supply_propval *val)
++{
++	struct wt41n0_battery *b = power_supply_get_drvdata(psy);
++
++	mutex_lock(&b->lock);
++	val->intval = psy == b->ac ? b->ac_online : b->usb_online;
++	mutex_unlock(&b->lock);
++	return 0;
++}
++
++static const struct power_supply_desc battery_desc = {
++	.name = "wt41n0-battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = battery_props,
++	.num_properties = ARRAY_SIZE(battery_props),
++	.get_property = battery_get,
++};
++
++static const struct power_supply_desc ac_desc = {
++	.name = "wt41n0-cradle",
++	.type = POWER_SUPPLY_TYPE_MAINS,
++	.properties = online_props,
++	.num_properties = ARRAY_SIZE(online_props),
++	.get_property = online_get,
++};
++
++static const struct power_supply_desc usb_desc = {
++	.name = "wt41n0-usb",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.properties = online_props,
++	.num_properties = ARRAY_SIZE(online_props),
++	.get_property = online_get,
++};
++
++static char *supplied_to[] = { "wt41n0-battery" };
++
++static int wt41n0_battery_probe(struct platform_device *pdev)
++{
++	struct power_supply_config cfg = {}, src_cfg = {};
++	struct wt41n0_battery *b;
++	struct device_node *np;
++
++	b = devm_kzalloc(&pdev->dev, sizeof(*b), GFP_KERNEL);
++	if (!b)
++		return -ENOMEM;
++	b->dev = &pdev->dev;
++	b->temp_c = INT_MIN;
++	b->restarted = jiffies - msecs_to_jiffies(RESTART_MS);
++	mutex_init(&b->lock);
++	INIT_DELAYED_WORK(&b->work, wt41n0_battery_work);
++
++	np = of_parse_phandle(pdev->dev.of_node, "zebra,external-agent", 0);
++	if (!np)
++		return dev_err_probe(&pdev->dev, -EINVAL, "no zebra,external-agent\n");
++	b->ea = of_find_i2c_device_by_node(np);
++	of_node_put(np);
++	if (!b->ea)
++		return -EPROBE_DEFER;
++
++	b->vbat = devm_iio_channel_get(&pdev->dev, "vbat");
++	if (IS_ERR(b->vbat)) {
++		put_device(&b->ea->dev);
++		return dev_err_probe(&pdev->dev, PTR_ERR(b->vbat), "no vbat channel\n");
++	}
++
++	cfg.drv_data = b;
++	cfg.fwnode = dev_fwnode(&pdev->dev);
++	src_cfg.drv_data = b;
++	src_cfg.supplied_to = supplied_to;
++	src_cfg.num_supplicants = ARRAY_SIZE(supplied_to);
++
++	b->battery = devm_power_supply_register(&pdev->dev, &battery_desc, &cfg);
++	if (!IS_ERR(b->battery))
++		b->ac = devm_power_supply_register(&pdev->dev, &ac_desc, &src_cfg);
++	if (!IS_ERR_OR_NULL(b->ac))
++		b->usb = devm_power_supply_register(&pdev->dev, &usb_desc, &src_cfg);
++	if (IS_ERR(b->battery) || IS_ERR(b->ac) || IS_ERR(b->usb)) {
++		put_device(&b->ea->dev);
++		return dev_err_probe(&pdev->dev, -ENODEV, "cannot register power supplies\n");
++	}
++
++	platform_set_drvdata(pdev, b);
++	schedule_delayed_work(&b->work, 0);
++	return 0;
++}
++
++static void wt41n0_battery_remove(struct platform_device *pdev)
++{
++	struct wt41n0_battery *b = platform_get_drvdata(pdev);
++
++	cancel_delayed_work_sync(&b->work);
++	if (b->charging)
++		charger_disable(b);
++	put_device(&b->ea->dev);
++}
++
++static const struct of_device_id wt41n0_battery_of_match[] = {
++	{ .compatible = "zebra,wt41n0-battery" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, wt41n0_battery_of_match);
++
++static struct platform_driver wt41n0_battery_driver = {
++	.probe = wt41n0_battery_probe,
++	.remove = wt41n0_battery_remove,
++	.driver = {
++		.name = "wt41n0-battery",
++		.of_match_table = wt41n0_battery_of_match,
++	},
++};
++module_platform_driver(wt41n0_battery_driver);
++
++MODULE_DESCRIPTION("Zebra WT41N0 battery and TWL6030 charger control");
++MODULE_LICENSE("GPL");

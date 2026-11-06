@@ -21,6 +21,10 @@ CONFIG_FONT_8x16=y
 CONFIG_SERIAL_8250=y
 CONFIG_SERIAL_8250_OMAP=y
 
+# eMMC root filesystem: partitions given on the command line (blkdevparts=), since
+# the eMMC has no partition table Linux can read
+CONFIG_CMDLINE_PARTITION=y
+
 # Initramfs, /dev
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
@@ -68,6 +72,11 @@ CONFIG_LEDS_CLASS=y
 CONFIG_LEDS_WT41N0_EA=y
 CONFIG_LEDS_TRIGGER_HEARTBEAT=y
 CONFIG_LEDS_TRIGGER_TIMER=y
+
+# Battery and charger (TWL6030 charger, External Agent, PMIC ADC)
+CONFIG_POWER_SUPPLY=y
+CONFIG_LEDS_TRIGGERS=y
+CONFIG_BATTERY_WT41N0=y
 
 # Accelerometer
 CONFIG_MMA8452=y

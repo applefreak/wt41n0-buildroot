@@ -56,6 +56,7 @@ fi
 if [ -d "$LOCAL/firmware" ]; then
 	mkdir -p "$TARGET/lib/firmware"
 	cp -R "$LOCAL/firmware/." "$TARGET/lib/firmware/"
+	find "$TARGET/lib/firmware" -name .DS_Store -delete	# macOS Finder files
 fi
 
 # Size: the image has to stay below 15.2 MB (docs/boot-flow.md).

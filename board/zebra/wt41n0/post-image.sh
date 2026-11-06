@@ -57,8 +57,47 @@ python3 "$EXT/support/mkhex.py" \
 	--blob-out "$IMAGES/wt41n0-linux.blob.bin" \
 	-o "$IMAGES/wt41n0-linux.hex"
 
+# The eMMC system's boot image: the same kernel and the whole RAM system as its
+# initramfs, with /init replaced by board/zebra/wt41n0/emmc-init. That script
+# switches to the eMMC root file system, or stays in the RAM system as the recovery
+# system (ESC held at power-on, /boot/recovery-once, or no usable eMMC root). The
+# command line only defines the root partition (blkdevparts); the eMMC has no
+# partition table Linux could read.
+EMMC_DTB=$IMAGES/omap4-wt41n0-emmc.dtb
+EMMC_CPIO=$IMAGES/rootfs-emmc-boot.cpio.gz
+cp "$DTB" "$EMMC_DTB"
+"$FDTPUT" -t s "$EMMC_DTB" /chosen bootargs \
+	"$("$FDTGET" -t s "$DTB" /chosen bootargs) blkdevparts=mmcblk1:1687M@201M(rootfs)"
+python3 - "$IMAGES/rootfs.cpio" "$BOARD/emmc-init" "$EMMC_CPIO" <<'EOF'
+import gzip, sys
+base, init, out = sys.argv[1:]
+def entry(name, mode, data=b''):
+    name = name.encode() + b'\0'
+    fields = (0, mode, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(name), 0)
+    hdr = ('070701' + ''.join(f'{v:08X}' for v in fields)).encode() + name
+    hdr += b'\0' * (-len(hdr) % 4)
+    return hdr + data + b'\0' * (-len(data) % 4)
+# A second archive after the first: the kernel unpacks them in order, so this /init
+# replaces the RAM system's.
+extra = entry('init', 0o100755, open(init, 'rb').read()) + entry('boot', 0o40755) + entry('TRAILER!!!', 0)
+open(out, 'wb').write(gzip.compress(open(base, 'rb').read() + extra, compresslevel=9, mtime=0))
+EOF
+size=$(stat -c %s "$EMMC_CPIO")
+"$FDTPUT" -t x "$EMMC_DTB" /chosen linux,initrd-end "$(printf '%x' $((0x89000000 + size)))"
+python3 "$EXT/support/mkhex.py" \
+	--loader "$IMAGES/wt41n0-loader.bin" \
+	--zimage "$IMAGES/zImage" \
+	--dtb "$EMMC_DTB" \
+	--initramfs "$EMMC_CPIO" \
+	--entry-out "$IMAGES/wt41n0-emmc.entry.bin" \
+	--blob-out "$IMAGES/wt41n0-emmc.blob.bin" \
+	-o "$IMAGES/wt41n0-emmc.hex"
+
 # Optional: run the loader in an emulator when the "unicorn" module is around.
 if python3 -c 'import unicorn' 2>/dev/null; then
-	python3 "$EXT/support/emulate_loader.py" "$IMAGES/wt41n0-linux.entry.bin" "$IMAGES/wt41n0-linux.blob.bin" | tail -1
+	for img in wt41n0-linux wt41n0-emmc; do
+		python3 "$EXT/support/emulate_loader.py" "$IMAGES/$img.entry.bin" "$IMAGES/$img.blob.bin" | tail -1
+	done
 fi
 echo "WT41N0: flash with  support/flash.py $IMAGES/wt41n0-linux.hex"
+echo "WT41N0: install on the eMMC with  support/install.py $IMAGES --host root@<address>"

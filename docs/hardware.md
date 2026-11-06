@@ -10,7 +10,7 @@ GPIO numbers (bank = number / 32 + 1, line = number % 32).
 |---|---|---|---|
 | SoC | TI OMAP4430 ES2.3, 2 x Cortex-A9, GP (unsigned) | - | working |
 | RAM | 512 MiB LPDDR2 (package on package) | - | working |
-| Storage | 4 GB eMMC (Toshiba, `004G60`) on MMC2, 8-bit | `omap_hsmmc` | working (read; Symbol layout, no partition table) |
+| Storage | 4 GB eMMC (Toshiba, `004G60`) on MMC2, 8-bit | `omap_hsmmc` | working (read; Symbol partition layout, see "Storage") |
 | Display | 240x320 RGB565 LCD, set up by the bootloader | `simple-framebuffer` + fbcon | working |
 | Backlight | timer 9 PWM | `pwm-backlight` | working |
 | PMIC | TI TWL6030 on I2C1 0x48-0x4A | `twl-core`, `twl6030-regulator`, GPADC, RTC | working |
@@ -71,6 +71,48 @@ interrupt, 100 Wi-Fi enable, 103 Bluetooth enable, 104 audio codec power (`audpw
 - **Do not access I2C1 address 0x6C**: reading its register 2 hangs the unit. The chip is
   unidentified. Nothing answers at 0x6A, where the stock OS configuration lists a BQ24156
   charger.
+
+## Storage
+
+eMMC on MMC2, `/dev/mmcblk1` under Linux: a 1888 MiB user area plus two 2 MiB boot
+partitions. There is no MBR or GPT for the whole device. The Symbol monitor keeps its own
+partition table at byte offset `0x300000` (3 MiB). Each entry is a 32-byte name, 4 bytes
+not decoded, then start, length (both in 512-byte sectors) and flags (32-bit
+little-endian). The entries that describe the user area:
+
+| Region | Start | End | Content |
+|---|---|---|---|
+| BootLoader | 0 | 0.5 MiB | x-loader and bootloader (configuration header `CHSETTINGS` at 0) |
+| Monitor | 1 MiB | 2 MiB | Symbol monitor (an image with the `ECEC` signature) |
+| partition table | 3 MiB | | this table |
+| Monitor data | 3.5 MiB | 4 MiB | written by the monitor (changes after USB downloads) |
+| Config Block | 4 MiB | 4.5 MiB | written by the monitor |
+| Splash screen | 4.5 MiB | 5.5 MiB | boot splash bitmap |
+| *unassigned* | 5.5 MiB | 80 MiB | not in the table; all zeros |
+| OS | 80 MiB | 200 MiB | the flashed OS image (Windows CE or this BSP's image) |
+| Application | 200 MiB | 1368 MiB | Windows CE `\Application`: TexFAT volume with the unit's Windows CE configuration |
+| Platform | 1368 MiB | 1880 MiB | Windows CE `\Platform`: TexFAT volume, empty |
+| Scratchpad | 1880 MiB | 1888 MiB | written by the stock OS |
+
+- Application and Platform each start with a one-sector MBR (one entry, type `0x0b`)
+  followed by a TexFAT volume (exFAT with two FATs). Windows CE formats them itself when
+  it cannot mount them, and again on a clean boot.
+- The OS area can hold an old volume header after the end of the flashed image; it is a
+  leftover, not a live volume.
+- At every boot the monitor looks up the partition flagged `0x100000` (Application, its
+  "persistent store") and reads that partition's first sector. If the table has no such
+  entry, or the read fails, it does not boot ("Cannot find / Cannot read persistent
+  store"). If the sector lacks the `0x55AA` signature, it boots anyway but passes a clean
+  boot flag to the OS. It does not examine Platform or Scratchpad when booting.
+- The monitor has a service console with commands that erase a partition, relocate a
+  partition, repartition the device and write-protect blocks. None of them run on a
+  normal boot.
+- The user area runs in enhanced mode (`ENH_SIZE_MULT` = maximum): the 4 GB chip is
+  configured as 1888 MiB of the more durable single-bit-per-cell storage. Permanent write
+  protection is disabled for good, and power-on write protection is not active.
+- Other table entries (Exec, Control, IST, External agent, SuperSpam) describe RAM or
+  other chips: the monitor's 48 MiB staging area at `0x80268000`, and the firmware of the
+  sensor, External Agent and FPGA.
 
 ## Display and backlight
 
@@ -135,16 +177,17 @@ The pen level can also be read directly at S+`0x14` bit 5.
 
 ### Outputs
 
-| Output | Register (set / clear) | Bit |
-|---|---|---|
-| DECODE LED | S+0x28 / 0x2A | 1 |
-| SCAN LED | S+0x28 / 0x2A | 2 |
-| CTRL LED | S+0x18 / 0x1A | 2 |
-| FUNC LED | S+0x18 / 0x1A | 0 |
-| audio amplifier enable | S+0x98 / 0x9A | 3 |
+| Output | Register (set / clear) | Bit | Linux GPIO line |
+|---|---|---|---|
+| accessory port power (ring scanner, UART2) | S+0x28 / 0x2A | 1 | `accessory-power` |
+| accessory "scan" (named SCAN LED by the stock OS) | S+0x28 / 0x2A | 2 | `accessory-scan` |
+| keypad CTRL LED output | S+0x18 / 0x1A | 2 | `keypad-ctrl-led` |
+| keypad FUNC LED output | S+0x18 / 0x1A | 0 | `keypad-func-led` |
+| audio amplifier enable | S+0x98 / 0x9A | 3 | `audio-amplifier` |
 
-The four LED outputs switch, but no LED on the unit itself lights; they probably serve the
-accessory ports. The built-in speaker plays without the amplifier bit.
+The stock OS powers the scanner port with S+0x28 bit 1 (`Uart2\DevPower`, active high,
+initially off); toggling it power-cycles an attached ring scanner. The keypad LED outputs
+light nothing on the unit itself. The built-in speaker plays without the amplifier bit.
 
 Beeper registers: S+`0x94` frequency divider (bits 5:0) and duration (bits 7:6),
 S+`0x9C` amplitude, S+`0xA0` duration, start with S+`0x98` = 2, stop with S+`0x9A` = 2.
@@ -196,6 +239,9 @@ TI WL1283 (WiLink 7): Wi-Fi 802.11a/b/g/n and Bluetooth in one chip.
   commands, so Linux uses it as BR/EDR only (kernel patch 0009).
 - The two halves share the chip: resetting the Bluetooth core (for example by restarting
   its driver, or a failed init script) also crashes the Wi-Fi firmware.
+- A warm reboot does not reset the chip: Wi-Fi then comes up unable to transmit
+  ("Tx stuck (in FW)"). The last shutdown step (`wt41n0-poweroff-radio`) drives both
+  enable lines low before rebooting; a power-cycle resets it anyway.
 
 ## USB
 

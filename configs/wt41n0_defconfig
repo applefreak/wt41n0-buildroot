@@ -66,9 +66,19 @@ BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_WT41N0_LOADER=y
 BR2_PACKAGE_WT41N0_UTILS=y
 
-# Root filesystem: initramfs loaded by the loader
+# Root filesystems: an initramfs loaded by the loader (the RAM system, also the
+# installer), and an ext4 image of the same tree for the eMMC partition from 201 MiB
+# to the end. The image is 128 MiB; the first boot grows it to the partition
+# (S05growfs). See docs/customizing.md.
 BR2_TARGET_ROOTFS_CPIO=y
 BR2_TARGET_ROOTFS_CPIO_GZIP=y
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_LABEL="wt41n0-root"
+BR2_TARGET_ROOTFS_EXT2_SIZE="128M"
+BR2_TARGET_ROOTFS_EXT2_RESBLKS=1
+BR2_TARGET_ROOTFS_EXT2_MKFS_OPTIONS="-O ^64bit -b 4096"
+BR2_TARGET_ROOTFS_EXT2_GZIP=y
 # BR2_TARGET_ROOTFS_TAR is not set
 
 # Host tools: fdtput, used by post-image.sh

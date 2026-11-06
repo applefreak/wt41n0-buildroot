@@ -1,11 +1,13 @@
 #!/bin/sh
 # wt41n0-fpga: show the FPGA's register blocks (see docs/hardware.md, "FPGA").
 #
-# Usage: wt41n0-fpga          print the S, X and Y block registers
-#        wt41n0-fpga pen      print the touch pen level (S+0x14 bit 5) for 10 s
+# Usage: wt41n0-fpga                print the S, X and Y block registers
+#        wt41n0-fpga pen            print the touch pen level (S+0x14 bit 5) for 10 s
+#        wt41n0-fpga power on|off   switch the accessory port (ring scanner) power
 #
-# Read-only: the kernel driver (wt41n0-fpga) owns the chip select and interrupts.
-# The FPGA's outputs are LED class devices: /sys/class/leds/wt41n0:*.
+# The kernel driver (wt41n0-fpga) owns the chip select and interrupts and exposes the
+# outputs as the GPIO lines of the "wt41n0-fpga" chip: 0 accessory-power,
+# 1 accessory-scan, 2 keypad-ctrl-led, 3 keypad-func-led, 4 audio-amplifier.
 S=0x02020000; X=0x02080000; Y=0x020C0000
 
 dump() {	# dump <name> <base> <offsets...>
@@ -28,6 +30,20 @@ pen)
 		usleep 500000; i=$((i + 1))
 	done
 	;;
+power)
+	chip=$(grep -l '^wt41n0-fpga$' /sys/class/gpio/gpiochip*/label 2>/dev/null | head -1)
+	[ -n "$chip" ] || { echo "no wt41n0-fpga GPIO chip" >&2; exit 1; }
+	gpio=$(cat "${chip%/label}/base")	# line 0: accessory-power
+	dir=/sys/class/gpio/accessory-power	# sysfs names exported lines by their name
+	[ -d $dir ] || echo $gpio > /sys/class/gpio/export
+	case "${2:-}" in
+	on) echo 1 > $dir/value ;;
+	off) echo 0 > $dir/value ;;
+	"") ;;
+	*) echo "usage: $0 power [on|off]" >&2; exit 1 ;;
+	esac
+	echo "accessory power: $(cat $dir/value)"
+	;;
 *)
-	echo "usage: $0 [pen]" >&2; exit 1 ;;
+	echo "usage: $0 [pen | power [on|off]]" >&2; exit 1 ;;
 esac

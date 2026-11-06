@@ -13,6 +13,45 @@ selection, `make linux-menuconfig` the kernel, `make busybox-menuconfig` BusyBox
 | random seed in the device tree | on by default: the kernel's random generator is ready at boot, so ssh answers right away (without it, about a minute) |
 | boot verbosity | `quiet`, `verbose` or `debug` (see `debugging.md`) |
 
+## Installing on the eMMC
+
+By default the system runs from RAM and nothing persists. It can also be installed on
+the eMMC, where it runs from an ext4 root file system and keeps every change:
+
+```sh
+support/install.py output/images --host root@<address>
+```
+
+The unit has to run this system (from RAM or already from the eMMC) and be reachable
+over ssh. The script writes `rootfs.ext4.gz` to the eMMC from 201 MiB to the end,
+installs the eMMC boot image `wt41n0-emmc.hex` into the OS area and reboots. On the
+first boot `S05growfs` grows the 128 MiB file system to its 1687 MiB partition.
+
+**This erases the Windows CE Application and Platform partitions.** The boot chain, the
+OS area and Application's first sector (which the bootloader checks) are not touched.
+See `hardware.md` ("Storage") for the layout.
+
+**The eMMC boot image is also the recovery system.** It carries the complete RAM system;
+its `/init` (`board/zebra/wt41n0/emmc-init`) switches to the eMMC root unless:
+
+- **ESC is held** while the unit starts (not working yet: the key is not seen at that
+  point of the boot),
+- `/boot/recovery-once` exists on the eMMC root (it is removed when used), or
+- the eMMC root is missing or cannot be mounted.
+
+The recovery system is the RAM system, with Wi-Fi, ssh and the installer.
+
+- **Updating the kernel:** `support/update.py output/images/wt41n0-emmc.hex`. It
+  writes only the OS area.
+- **Updating the root file system:** run `install.py` again. It reboots into the
+  recovery system, rewrites the partition (your changes on the unit are lost) and
+  reboots into the new root.
+- **Back to the RAM-only system:** `support/update.py output/images/wt41n0-linux.hex`,
+  or download mode with `flash.py`. The eMMC root stays as it is.
+- **Back to Windows CE:** flash the stock OS in download mode, then Zebra's
+  `CleanAppl.hex` and `CleanPlat.hex` from its OS update package. Windows CE then
+  formats fresh Application and Platform partitions on its first boot.
+
 ## Wi-Fi and ssh
 
 Put these in `local/` and rebuild (`make` is enough):

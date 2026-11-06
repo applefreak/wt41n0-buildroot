@@ -60,6 +60,20 @@ WebUSB. Serve it locally (`cd support/flasher && python3 -m http.server 8000`, t
 `http://localhost:8000`) or from any HTTPS host, choose the HEX file and click **Connect
 and flash**. On Windows, bind the WinUSB driver to the unit (`05e0:200b`) with Zadig first.
 
+**Installing on the eMMC.** The system can also run from the eMMC, with an ext4 root
+file system that keeps every change (`support/install.py`, see `docs/customizing.md`).
+This replaces the Windows CE data partitions.
+
+**Updating a running unit.** Once the unit runs this system and is reachable over ssh,
+a new build can be installed without download mode:
+
+```sh
+support/update.py output/images/wt41n0-linux.hex --host root@<address>
+```
+
+It writes the image to the same eMMC area download mode uses, verifies it and reboots.
+If an image does not boot, download mode and `flash.py` still work as before.
+
 To return to Windows CE, flash Zebra's stock OS update for the WT41N0
 (`41X0c70BenOS055702.hex`, from Zebra's support site) the same way. Get that file
 before you start, so you always have a way back.

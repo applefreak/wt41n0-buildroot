@@ -5,6 +5,9 @@ config BR2_PACKAGE_WT41N0_UTILS
 
 	    pcmtest         play a test tone or record, straight through
 	                    the kernel PCM interface (no ALSA library)
-	    wt41n0-fpga     print the FPGA registers, the touch pen level
+	    wt41n0-fpga     FPGA registers, touch pen level, accessory power
 	    wt41n0-survey   collect logs and hardware state (read-only)
+	    wt41n0-update   install a new image into the eMMC OS area
+	    wt41n0-install-root  write the root filesystem to the eMMC
+	    wt41n0-growfs   grow the eMMC root file system to its partition
 	    keys            show the keypad layers

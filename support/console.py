@@ -15,11 +15,12 @@ import argparse
 import glob
 import os
 import select
+import shlex
 import sys
 import time
 import tty
 
-END = b'__WT41N0_END__'
+MARK = b'__WT41N0_'
 
 
 def find_port():
@@ -38,29 +39,43 @@ def main():
 
     fd = os.open(args.port or find_port(), os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     tty.setraw(fd)
-    # Start from an empty prompt and drop whatever is buffered.
-    os.write(fd, b'\n')
-    time.sleep(0.3)
     try:
-        os.read(fd, 65536)
-    except BlockingIOError:
-        pass
-
-    marker = b'echo ' + END
-    os.write(fd, args.command.encode() + b'; ' + marker + b'\n')
-    out, deadline = b'', time.time() + args.wait
-    while time.time() < deadline and END + b'\r' not in out.split(marker, 1)[-1]:
-        if select.select([fd], [], [], 0.2)[0]:
-            try:
-                out += os.read(fd, 65536)
-            except BlockingIOError:
-                pass
-    os.close(fd)
+        # Turn off the shell's echo, so the reply holds only the command's output (the
+        # echoed command line could be wrapped by the line editor), and drop what is
+        # buffered. The markers are split in the command text, so only the output of
+        # echo contains them.
+        os.write(fd, b'stty -echo\n')
+        time.sleep(0.3)
+        drain(fd)
+        os.write(fd, b'echo "%s""BEGIN__"; sh -c %s; echo "%s""END__"\n'
+                 % (MARK, shlex.quote(args.command).encode(), MARK))
+        out, deadline = b'', time.time() + args.wait
+        while time.time() < deadline and MARK + b'END__' not in out:
+            if select.select([fd], [], [], 0.2)[0]:
+                out += drain(fd)
+    finally:
+        os.write(fd, b'stty echo\n')
+        os.close(fd)
 
     text = out.replace(b'\r', b'').decode(errors='replace')
-    text = text.split(marker.decode() + '\n', 1)[-1]
-    print(text.split(END.decode(), 1)[0].rstrip())
+    text = text.split(MARK.decode() + 'BEGIN__\n', 1)[-1]
+    done = MARK.decode() + 'END__' in text
+    print(text.split(MARK.decode() + 'END__', 1)[0].rstrip())
+    if not done:
+        sys.exit(f'(no end marker after {args.wait:g} s: output may be incomplete, try --wait)')
 
+
+def drain(fd):
+    data = b''
+    try:
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            data += chunk
+    except BlockingIOError:
+        pass
+    return data
 
 if __name__ == '__main__':
     main()

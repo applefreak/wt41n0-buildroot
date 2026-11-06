@@ -5,34 +5,36 @@ Subject: [PATCH] misc: add a driver for the Zebra WT41N0 FPGA
 
 The WT41N0 has an Actel IGLOO+ FPGA on GPMC chip select 1. It contains an
 interrupt controller for 24 sources (the touch controller's pen interrupt
-is source 0), several LED outputs and the audio amplifier switch.
+is source 0) and a few outputs: the accessory ports' power switch, two
+keypad LED outputs and the audio amplifier switch.
 
-Register the interrupt controller as an irq domain and the outputs as LED
-class devices.
+Register the interrupt controller as an irq domain and the outputs as named
+GPIO lines. The accessory power line (the ring scanner's supply) starts off.
 
 Upstream: not submitted
 ---
- drivers/misc/Kconfig       |   8 +
+ drivers/misc/Kconfig       |   9 +
  drivers/misc/Makefile      |   1 +
- drivers/misc/wt41n0-fpga.c | 317 +++++++++++++++++++++++++++++++++++++
- 3 files changed, 326 insertions(+)
+ drivers/misc/wt41n0-fpga.c | 334 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 344 insertions(+)
  create mode 100644 drivers/misc/wt41n0-fpga.c
 
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
-index 3fe7e2a9b..341f458f3 100644
+index 3fe7e2a9b..fad946960 100644
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
-@@ -628,4 +628,12 @@ source "drivers/misc/uacce/Kconfig"
+@@ -628,4 +628,13 @@ source "drivers/misc/uacce/Kconfig"
  source "drivers/misc/pvpanic/Kconfig"
  source "drivers/misc/mchp_pci1xxxx/Kconfig"
  source "drivers/misc/keba/Kconfig"
 +config WT41N0_FPGA
-+	tristate "Zebra WT41N0 FPGA (interrupt controller, LEDs)"
-+	depends on OF && LEDS_CLASS
++	tristate "Zebra WT41N0 FPGA (interrupt controller, outputs)"
++	depends on OF && GPIOLIB
 +	help
 +	  Support for the Actel FPGA on the Zebra/Symbol WT41N0 handheld, attached
 +	  to the OMAP4 GPMC: interrupt controller for the touch pen and other
-+	  sources, keypad/decode/scan LEDs and the audio amplifier switch.
++	  sources, and its outputs (accessory power, keypad LED outputs, audio
++	  amplifier) as GPIO lines.
 +
  endmenu
 diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
@@ -46,10 +48,10 @@ index a9f94525e..bfc38fe03 100644
 +obj-$(CONFIG_WT41N0_FPGA)	+= wt41n0-fpga.o
 diff --git a/drivers/misc/wt41n0-fpga.c b/drivers/misc/wt41n0-fpga.c
 new file mode 100644
-index 000000000..57c405282
+index 000000000..f4d584d92
 --- /dev/null
 +++ b/drivers/misc/wt41n0-fpga.c
-@@ -0,0 +1,317 @@
+@@ -0,0 +1,334 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Zebra/Symbol WT41N0 Actel FPGA on the OMAP4 GPMC.
@@ -66,15 +68,16 @@ index 000000000..57c405282
 + * enables the FPGA interrupt output, which goes to an OMAP GPIO (rising edge).
 + * Each of the 24 sources has an enable bit in a block set/clear register pair.
 + *
-+ * This driver provides: an irq_chip/domain for the 24 sources (used by the
-+ * SX8650 touch controller, source 0), LED class devices, and the audio PA switch.
++ * This driver provides an irq_chip/domain for the 24 sources (used by the SX8650
++ * touch controller, source 0) and the FPGA's outputs as GPIO lines. Line 0 switches
++ * the accessory ports' power (the ring scanner's UART); it starts off.
 + */
 +#include <linux/bitops.h>
++#include <linux/gpio/driver.h>
 +#include <linux/interrupt.h>
 +#include <linux/io.h>
 +#include <linux/irq.h>
 +#include <linux/irqdomain.h>
-+#include <linux/leds.h>
 +#include <linux/module.h>
 +#include <linux/of.h>
 +#include <linux/of_irq.h>
@@ -90,12 +93,9 @@ index 000000000..57c405282
 +#define GLOBAL_IRQ_EN	0x80
 +#define GLOBAL_WAKE_EN	0x40
 +
-+#define S_LED_KBD_SET	(FPGA_S + 0x18)		/* bit2 CTRL LED, bit0 FUNC LED */
-+#define S_LED_KBD_CLR	(FPGA_S + 0x1A)
-+#define S_LED_SET	(FPGA_S + 0x28)		/* bit1 DECODE (green), bit2 SCAN */
-+#define S_LED_CLR	(FPGA_S + 0x2A)
-+#define S_AUDIO_SET	(FPGA_S + 0x98)		/* bit3 audio PA */
-+#define S_AUDIO_CLR	(FPGA_S + 0x9A)
++#define S_KBD_SET	(FPGA_S + 0x18)		/* bit2 CTRL, bit0 FUNC keypad LED outputs */
++#define S_ACC_SET	(FPGA_S + 0x28)		/* bit1 accessory power, bit2 accessory "scan" */
++#define S_AUDIO_SET	(FPGA_S + 0x98)		/* bit3 audio amplifier */
 +
 +#define WT41N0_FPGA_NR_IRQS	24
 +
@@ -138,8 +138,10 @@ index 000000000..57c405282
 +	struct device *dev;
 +	void __iomem *base;
 +	struct irq_domain *domain;
++	struct gpio_chip gc;
 +	int parent_irq;
 +	u32 enabled;			/* mask of enabled sources */
++	u32 outputs;			/* last value written to each output line */
 +};
 +
 +static inline u16 fpga_rd(struct wt41n0_fpga *f, u32 off)
@@ -152,52 +154,72 @@ index 000000000..57c405282
 +	writew(val, f->base + off);
 +}
 +
-+/* ---- LEDs ------------------------------------------------------------------ */
++/* ---- outputs as GPIO lines ---------------------------------------------- */
 +
-+struct fpga_led {
-+	struct led_classdev cdev;
-+	struct wt41n0_fpga *fpga;
-+	u32 set_reg;
-+	u16 mask;
++/* Each output is a bit in a set register; writing it to set_reg + 2 clears it. */
++static const struct { const char *name; u32 set_reg; u16 mask; } fpga_outputs[] = {
++	{ "accessory-power",	S_ACC_SET, BIT(1) },
++	{ "accessory-scan",	S_ACC_SET, BIT(2) },
++	{ "keypad-ctrl-led",	S_KBD_SET, BIT(2) },
++	{ "keypad-func-led",	S_KBD_SET, BIT(0) },
++	{ "audio-amplifier",	S_AUDIO_SET, BIT(3) },
 +};
 +
-+static void fpga_led_set(struct led_classdev *cdev, enum led_brightness b)
-+{
-+	struct fpga_led *led = container_of(cdev, struct fpga_led, cdev);
++static const char * const fpga_output_names[] = {
++	"accessory-power", "accessory-scan", "keypad-ctrl-led", "keypad-func-led",
++	"audio-amplifier",
++};
 +
-+	fpga_wr(led->fpga, b ? led->set_reg : led->set_reg + 2, led->mask);
++static void fpga_gpio_set(struct gpio_chip *gc, unsigned int off, int value)
++{
++	struct wt41n0_fpga *f = gpiochip_get_data(gc);
++
++	fpga_wr(f, value ? fpga_outputs[off].set_reg : fpga_outputs[off].set_reg + 2,
++		fpga_outputs[off].mask);
++	if (value)
++		f->outputs |= BIT(off);
++	else
++		f->outputs &= ~BIT(off);
 +}
 +
-+static const struct { const char *name; u32 set_reg; u16 mask; const char *trigger; } fpga_leds[] = {
-+	{ "wt41n0:green:decode", S_LED_SET, BIT(1), "heartbeat" },
-+	{ "wt41n0:red:scan",     S_LED_SET, BIT(2), NULL },
-+	{ "wt41n0:ctrl",         S_LED_KBD_SET, BIT(2), NULL },
-+	{ "wt41n0:func",         S_LED_KBD_SET, BIT(0), NULL },
-+	{ "wt41n0:audio-pa",     S_AUDIO_SET, BIT(3), NULL },
-+};
-+
-+static int fpga_leds_init(struct wt41n0_fpga *f)
++static int fpga_gpio_get(struct gpio_chip *gc, unsigned int off)
 +{
-+	int i, ret;
++	struct wt41n0_fpga *f = gpiochip_get_data(gc);
 +
-+	for (i = 0; i < ARRAY_SIZE(fpga_leds); i++) {
-+		struct fpga_led *led = devm_kzalloc(f->dev, sizeof(*led), GFP_KERNEL);
++	return !!(f->outputs & BIT(off));
++}
 +
-+		if (!led)
-+			return -ENOMEM;
-+		led->fpga = f;
-+		led->set_reg = fpga_leds[i].set_reg;
-+		led->mask = fpga_leds[i].mask;
-+		led->cdev.name = fpga_leds[i].name;
-+		led->cdev.brightness_set = fpga_led_set;
-+		led->cdev.max_brightness = 1;
-+		led->cdev.default_trigger = fpga_leds[i].trigger;
-+		fpga_led_set(&led->cdev, LED_OFF);
-+		ret = devm_led_classdev_register(f->dev, &led->cdev);
-+		if (ret)
-+			return ret;
-+	}
++static int fpga_gpio_get_direction(struct gpio_chip *gc, unsigned int off)
++{
++	return GPIO_LINE_DIRECTION_OUT;
++}
++
++static int fpga_gpio_direction_output(struct gpio_chip *gc, unsigned int off, int value)
++{
++	fpga_gpio_set(gc, off, value);
 +	return 0;
++}
++
++static int fpga_gpio_init(struct wt41n0_fpga *f)
++{
++	int i;
++
++	/* All outputs off, as the stock OS starts them (accessory power included) */
++	for (i = 0; i < ARRAY_SIZE(fpga_outputs); i++)
++		fpga_wr(f, fpga_outputs[i].set_reg + 2, fpga_outputs[i].mask);
++
++	f->gc.label = "wt41n0-fpga";
++	f->gc.parent = f->dev;
++	f->gc.owner = THIS_MODULE;
++	f->gc.base = -1;
++	f->gc.ngpio = ARRAY_SIZE(fpga_outputs);
++	f->gc.names = fpga_output_names;
++	f->gc.get = fpga_gpio_get;
++	f->gc.set = fpga_gpio_set;
++	f->gc.get_direction = fpga_gpio_get_direction;
++	f->gc.direction_output = fpga_gpio_direction_output;
++	f->gc.can_sleep = false;
++	return devm_gpiochip_add_data(f->dev, &f->gc, f);
 +}
 +
 +/* ---- interrupt controller --------------------------------------------------- */
@@ -344,10 +366,7 @@ index 000000000..57c405282
 +	ret = fpga_irq_init(f);
 +	if (ret)
 +		return ret;
-+	ret = fpga_leds_init(f);
-+	if (ret)
-+		return ret;
-+	return 0;
++	return fpga_gpio_init(f);
 +}
 +
 +static const struct of_device_id wt41n0_fpga_of_match[] = {
@@ -365,5 +384,5 @@ index 000000000..57c405282
 +};
 +module_platform_driver(wt41n0_fpga_driver);
 +
-+MODULE_DESCRIPTION("Zebra WT41N0 FPGA interrupt controller and LEDs");
++MODULE_DESCRIPTION("Zebra WT41N0 FPGA interrupt controller and outputs");
 +MODULE_LICENSE("GPL");

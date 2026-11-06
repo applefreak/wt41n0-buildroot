@@ -102,6 +102,14 @@
 		default-brightness-level = <14>;	/* 66 % */
 	};
 
+	/* Battery and charger: TWL6030 charger, External Agent, battery voltage on PMIC ADC input 3 */
+	battery {
+		compatible = "zebra,wt41n0-battery";
+		io-channels = <&twl_gpadc 3>;
+		io-channel-names = "vbat";
+		zebra,external-agent = <&ea>;
+	};
+
 	/* WL1283 Wi-Fi enable, OMAP GPIO 100 */
 	wlan_en_reg: regulator-wlan-en {
 		compatible = "regulator-fixed";
@@ -185,6 +193,9 @@
 
 /* Power button on the PMIC's PWRON pin: KEY_POWER input events. */
 &twl {
+	twl_gpadc: gpadc {
+	};
+
 	pwrbutton {
 		compatible = "ti,twl6030-pwrbutton";
 		interrupts = <0>;		/* PWRON */
@@ -271,7 +282,7 @@
 
 	/* External Agent MCU (Atmel XMEGA): body LEDs, battery and charger
 	 * manager, wake timer. Driver: drivers/leds/leds-wt41n0-ea.c. */
-	ea@42 {
+	ea: ea@42 {
 		compatible = "zebra,wt41n0-ea";
 		reg = <0x42>;
 	};
@@ -411,6 +422,10 @@
 		interrupts = <9 IRQ_TYPE_EDGE_RISING>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
+		/* outputs: 0 accessory power, 1 accessory "scan", 2/3 keypad
+		 * CTRL/FUNC LED outputs, 4 audio amplifier */
+		gpio-controller;
+		#gpio-cells = <2>;
 
 		gpmc,device-width = <2>;
 		gpmc,mux-add-data = <1>;		/* AAD multiplexed */

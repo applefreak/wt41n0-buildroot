@@ -1,0 +1,65 @@
+#!/bin/sh
+# wt41n0-update: install a new system image into the eMMC OS area, the same place
+# the bootloader's "Download from USB" writes it, and optionally reboot into it.
+#
+#   ssh root@<unit> wt41n0-update [--reboot | --check] < wt41n0-linux.img
+#   (or from the host: support/update.py wt41n0-linux.hex)
+#
+# The input is the decoded image (what mkhex.py builds), not the HEX file. Before
+# writing, the Symbol partition table must place the OS area at 80 MiB and the image
+# must look like a WT41N0 image. Only the OS area is written. Download mode stays
+# available as the fallback if a written image does not boot.
+set -eu
+DEV=/dev/mmcblk1
+OS_START_MIB=80			# OS (OS) partition: sectors 0x28000 .. 0x64000
+OS_SIZE_MIB=120
+MAX_IMAGE=$((0x81100000 - 0x10000 - 0x80268000))	# loader stack limit (docs/boot-flow.md)
+TMP=/tmp/wt41n0-update.img
+reboot=no; check=no
+case "${1:-}" in
+--reboot) reboot=yes ;;
+--check) check=yes ;;		# validate only, write nothing
+esac
+
+die() { echo "wt41n0-update: $*" >&2; rm -f "$TMP"; exit 1; }
+u32() { hexdump -s "$2" -n 4 -e '1/4 "%u"' "$1"; }	# little-endian word at offset
+
+# Symbol partition table at 3 MiB: entry "OS (OS)" must start at 80 MiB
+tab=/tmp/wt41n0-update.tab
+dd if=$DEV of=$tab bs=4096 skip=768 count=1 2>/dev/null
+off=$((0x4ec))			# the table entry "OS (OS)"
+[ "$(dd if=$tab bs=1 skip=$off count=7 2>/dev/null)" = "OS (OS)" ] || die "no OS entry in the eMMC partition table"
+start=$(u32 $tab $((off + 36))); len=$(u32 $tab $((off + 40)))
+rm -f $tab
+[ "$start" = $((OS_START_MIB * 2048)) ] && [ "$len" = $((OS_SIZE_MIB * 2048)) ] ||
+	die "unexpected OS area (start sector $start, length $len)"
+
+cat > "$TMP"
+size=$(wc -c < "$TMP")
+[ "$size" -gt $((0x20000 + 12)) ] || die "image too small ($size bytes)"
+[ "$size" -le "$MAX_IMAGE" ] || die "image is $size bytes, above the $MAX_IMAGE byte limit"
+[ "$(dd if="$TMP" bs=1 skip=64 count=4 2>/dev/null)" = ECEC ] || die "no ECEC signature: not an OS image"
+[ "$(hexdump -n 4 -e '1/4 "%08x"' "$TMP")" = ea00461e ] || die "image does not start with the entry branch"
+z=$(u32 "$TMP" $((0x20000))); d=$(u32 "$TMP" $((0x20004))); i=$(u32 "$TMP" $((0x20008)))
+[ $((0x2000c + z + d + i)) = "$size" ] || die "blob sizes do not add up to the image size"
+[ "$(hexdump -s $((0x2000c + 0x24)) -n 4 -e '1/4 "%08x"' "$TMP")" = 016f2818 ] || die "no zImage in the blob"
+
+if [ $check = yes ]; then
+	echo "wt41n0-update: image OK ($size bytes); not written (--check)"
+	rm -f "$TMP"; exit 0
+fi
+echo "wt41n0-update: writing $size bytes to the OS area at $OS_START_MIB MiB"
+dd if="$TMP" of=$DEV bs=1M seek=$OS_START_MIB conv=fsync 2>/dev/null
+sync
+want=$(sha256sum < "$TMP" | cut -d' ' -f1)
+echo 3 > /proc/sys/vm/drop_caches
+got=$(dd if=$DEV bs=1M skip=$OS_START_MIB count=$(( (size + 1048575) / 1048576 )) 2>/dev/null | head -c "$size" | sha256sum | cut -d' ' -f1)
+rm -f "$TMP"
+[ "$want" = "$got" ] || die "verification FAILED: the OS area does not match the image. Do not reboot; write it again or use download mode."
+echo "wt41n0-update: written and verified (sha256 ${want%"${want#????????????????}"})"
+if [ $reboot = yes ]; then
+	echo "wt41n0-update: rebooting"
+	# Detach the reboot so this command (and an ssh session running it) ends cleanly
+	# before the network goes away.
+	(sleep 2; reboot) </dev/null >/dev/null 2>&1 &
+fi

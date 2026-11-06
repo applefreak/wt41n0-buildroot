@@ -1,0 +1,53 @@
+#!/bin/sh
+# /init of the eMMC system's boot image. The image carries the whole RAM system as
+# its initramfs; this script decides whether to switch to the eMMC root file system
+# (the normal case) or to stay in the RAM system as the recovery system:
+#   - ESC held at power-on (not working yet: not detected this early in the boot),
+#   - /boot/recovery-once on the eMMC root (removed when used; support/install.py
+#     uses it to reinstall the root file system),
+#   - the eMMC root missing or not mountable.
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+[ -c /dev/console ] && exec 0</dev/console 1>/dev/console 2>/dev/console
+
+reason=""
+
+# ESC: keypad matrix row 3, column 7 = bit 31 of KBD_FULLCODE31_0 (0x4A31C044,
+# bit = row * 8 + column). The keypad
+# controller scans only while its input device is open.
+# Nothing here may abort the script: /init exiting is a kernel panic.
+for d in /sys/class/input/input*; do
+	[ "$(cat $d/name 2>/dev/null)" = 4a31c000.keypad ] || continue
+	ev=$(ls -d $d/event* 2>/dev/null | head -1)
+	node=/dev/input/${ev##*/}
+	[ -n "$ev" ] && [ -c "$node" ] || continue
+	code=$( { usleep 200000; devmem 0x4A31C044 32; } 3<"$node" 2>/dev/null )
+	[ -n "$code" ] && [ $(( code & 0x80000000 )) != 0 ] && reason="ESC held"
+done
+
+if [ -z "$reason" ]; then
+	i=0
+	while [ ! -b /dev/mmcblk1p1 ] && [ $i -lt 50 ]; do usleep 100000; i=$((i + 1)); done
+	mkdir -p /newroot
+	if [ ! -b /dev/mmcblk1p1 ]; then
+		reason="no eMMC root partition"
+	elif ! mount -t ext4 -o rw /dev/mmcblk1p1 /newroot 2>/dev/null; then
+		reason="eMMC root file system not mountable"
+	elif [ -e /newroot/boot/recovery-once ]; then
+		rm -f /newroot/boot/recovery-once
+		umount /newroot
+		reason="recovery requested (/boot/recovery-once)"
+	elif [ ! -x /newroot/sbin/init ]; then
+		umount /newroot
+		reason="no /sbin/init on the eMMC root"
+	else
+		umount /proc /sys
+		mount --move /dev /newroot/dev
+		exec switch_root /newroot /sbin/init
+	fi
+fi
+
+echo "WT41N0: starting the recovery system ($reason)"
+umount /proc /sys
+exec /sbin/init
