@@ -1,0 +1,7 @@
+# Private files: Wi-Fi credentials, ssh keys
+/local/*
+!/local/README.md
+__pycache__/
+.DS_Store
+# images copied out by build-in-container.sh
+/images/

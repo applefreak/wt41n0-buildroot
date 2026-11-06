@@ -1,0 +1,10 @@
+# Added for the debug boot profile (BR2_WT41N0_BOOT_DEBUG): the low-level debug
+# console that draws text on the LCD from the kernel decompressor onward.
+#
+# Do not enable a UART early console instead: no reachable UART exists on this
+# board and the 8250 early console waits forever for the transmitter.
+CONFIG_DEBUG_LL=y
+CONFIG_DEBUG_WT41N0_LCD=y
+CONFIG_EARLY_PRINTK=y
+CONFIG_DEBUG_UNCOMPRESS=y
+# CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER is not set

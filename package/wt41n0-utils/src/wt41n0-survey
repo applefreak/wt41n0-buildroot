@@ -1,0 +1,40 @@
+#!/bin/sh
+# wt41n0-survey: collect the system's hardware state for debugging or a bug report.
+# Read-only: it only reads /proc, /sys and debugfs, and lists which I2C addresses
+# answer (it never reads device registers; I2C1 address 0x6c hangs the unit when
+# read). Output: a directory and a tar archive.
+#
+# Usage: wt41n0-survey [output directory]     (default /tmp/wt41n0-survey)
+set -u
+OUT=${1:-/tmp/wt41n0-survey}
+mkdir -p "$OUT"
+mount | grep -q ' /sys/kernel/debug ' || mount -t debugfs none /sys/kernel/debug 2>/dev/null
+D=/sys/kernel/debug
+
+save() {	# save <file> <command...>
+	f=$1; shift
+	"$@" > "$OUT/$f" 2>&1
+}
+
+save system.txt sh -c 'uname -a; echo; cat /proc/cmdline; echo; uptime; echo; cat /proc/meminfo | head -5'
+save dmesg.txt dmesg
+save interrupts.txt cat /proc/interrupts
+save iomem.txt cat /proc/iomem
+save deferred.txt cat $D/devices_deferred
+save gpio.txt cat $D/gpio
+save clocks.txt cat $D/clk/clk_summary
+save pinmux.txt sh -c "cat $D/pinctrl/*/pinmux-pins"
+save regulators.txt sh -c 'for r in /sys/class/regulator/regulator.*; do
+	echo "$(cat $r/name) state=$(cat $r/state 2>/dev/null) uV=$(cat $r/microvolts 2>/dev/null) users=$(cat $r/num_users)"
+done'
+save i2c.txt sh -c 'for b in /dev/i2c-*; do echo "== $b"; i2cdetect -y "${b#/dev/i2c-}"; done'
+save devices.txt sh -c 'ls -l /dev/input /dev/mmcblk* /dev/ttyGS* /dev/snd 2>&1; echo; cat /proc/bus/input/devices'
+save storage.txt sh -c 'cat /proc/partitions; for c in /sys/class/mmc_host/*/mmc*; do echo "$c: $(cat $c/name 2>/dev/null) $(cat $c/type 2>/dev/null)"; done'
+save network.txt sh -c 'ip addr; echo; iw dev 2>&1; echo; wpa_cli -i wlan0 status 2>&1'
+save bluetooth.txt sh -c 'ls /sys/class/bluetooth; for r in /sys/class/rfkill/rfkill*; do echo "$(cat $r/type) $(cat $r/name) soft=$(cat $r/soft) hard=$(cat $r/hard)"; done; bluetoothctl --timeout 3 show 2>&1'
+save sound.txt sh -c 'cat /proc/asound/cards; echo; amixer contents 2>&1'
+save leds-backlight.txt sh -c 'for l in /sys/class/leds/*; do echo "$(basename $l) $(cat $l/brightness)"; done; echo; cat /sys/class/backlight/*/brightness'
+save logs.txt sh -c 'cat /var/log/boot.log /var/log/wifi.log 2>/dev/null | grep -v -i -E "psk|passphrase"'
+
+tar -cf "$OUT.tar" -C "$(dirname "$OUT")" "$(basename "$OUT")" 2>/dev/null
+echo "wt41n0-survey: $(ls "$OUT" | wc -l) files in $OUT, archive $OUT.tar"

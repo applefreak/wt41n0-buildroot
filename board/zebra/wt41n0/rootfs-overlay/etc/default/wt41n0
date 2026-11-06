@@ -1,0 +1,18 @@
+# WT41N0 start-up settings. BOOT_VERBOSITY is set at build time from the
+# "boot verbosity" option; the others can be changed here or in an overlay.
+
+# quiet: start-up scripts log to /var/log/boot.log, only failures reach the LCD
+# verbose: every start-up script line goes to the LCD
+BOOT_VERBOSITY=verbose
+
+# Kernel messages printed on the LCD once start-up has finished, so they do not
+# interrupt the shell: 4 = warnings and worse. 8 shows everything, empty keeps
+# the boot level. All messages stay in the kernel log ("dmesg") either way.
+CONSOLE_LOGLEVEL=4
+
+# Print the address on the LCD when Wi-Fi gets one (handy on a device whose
+# keypad makes typing "ip addr" slow).
+SHOW_ADDRESS=yes
+
+# Speaker volume set at boot, 0..29 (22 and above is very loud).
+SPEAKER_VOLUME=8

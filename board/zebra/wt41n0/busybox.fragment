@@ -1,0 +1,14 @@
+# Applets on top of Buildroot's default BusyBox configuration.
+
+# Used by the start-up scripts and wt41n0-utils
+CONFIG_LOADKMAP=y
+CONFIG_DEVMEM=y
+CONFIG_I2CDETECT=y
+CONFIG_USLEEP=y
+CONFIG_RFKILL=y
+
+# For hardware work on the unit
+CONFIG_I2CGET=y
+CONFIG_I2CSET=y
+CONFIG_I2CDUMP=y
+CONFIG_HEXDUMP=y

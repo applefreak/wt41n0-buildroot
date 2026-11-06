@@ -1,0 +1,99 @@
+# WT41N0 options on top of omap2plus_defconfig. Everything the board needs is
+# built in (=y). omap2plus_defconfig also builds hundreds of drivers for other
+# boards as modules; post-build.sh leaves those out of the image, because the
+# whole image has to stay below 15.2 MB (see docs/boot-flow.md). Do not switch
+# CONFIG_MODULES off instead: Kconfig then builds all of them into the kernel.
+
+# Console on the LCD: simple-framebuffer + fbcon (rotated). The deferred
+# takeover keeps the loader's screen until the first console output.
+CONFIG_ARCH_OMAP4=y
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_FB=y
+CONFIG_FB_SIMPLE=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
+CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y
+CONFIG_FONTS=y
+CONFIG_FONT_8x8=y
+CONFIG_FONT_8x16=y
+# CONFIG_LOGO is not set
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_OMAP=y
+
+# Initramfs, /dev
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_TMPFS=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+CONFIG_PRINTK_TIME=y
+# /dev/mem for wt41n0-fpga and hardware debugging
+CONFIG_DEVMEM=y
+# CONFIG_STRICT_DEVMEM is not set
+
+# USB device port: MUSB + TWL6030 PHY, serial gadget (PIO only)
+CONFIG_USB=y
+CONFIG_USB_MUSB_HDRC=y
+CONFIG_USB_MUSB_DUAL_ROLE=y
+CONFIG_USB_MUSB_OMAP2PLUS=y
+CONFIG_MUSB_PIO_ONLY=y
+CONFIG_OMAP_USB2=y
+CONFIG_OMAP_CONTROL_PHY=y
+CONFIG_TWL6030_USB=y
+CONFIG_USB_GADGET=y
+CONFIG_USB_U_SERIAL=y
+CONFIG_USB_G_SERIAL=y
+CONFIG_USB_CONFIGFS=y
+
+# Input: keypad, touch (Semtech SX8650), power button
+CONFIG_INPUT_EVDEV=y
+CONFIG_KEYBOARD_OMAP4=y
+CONFIG_TOUCHSCREEN_SX8654=y
+CONFIG_INPUT_TWL6030_PWRBUTTON=y
+
+# PMIC (TWL6030): ADC, RTC, clocks; backlight PWM on timer 9
+CONFIG_TWL6030_GPADC=y
+CONFIG_IIO=y
+CONFIG_RTC_DRV_TWL4030=y
+CONFIG_CLK_TWL=y
+CONFIG_PWM=y
+CONFIG_PWM_OMAP_DMTIMER=y
+CONFIG_BACKLIGHT_PWM=y
+CONFIG_OMAP_WATCHDOG=y
+
+# FPGA (interrupt controller for the touch pen, outputs) and body LEDs
+CONFIG_WT41N0_FPGA=y
+CONFIG_LEDS_CLASS=y
+CONFIG_LEDS_WT41N0_EA=y
+CONFIG_LEDS_TRIGGER_HEARTBEAT=y
+CONFIG_LEDS_TRIGGER_TIMER=y
+
+# Accelerometer
+CONFIG_MMA8452=y
+
+# Wi-Fi and Bluetooth (TI WL1283)
+CONFIG_CFG80211=y
+CONFIG_MAC80211=y
+CONFIG_RFKILL=y
+CONFIG_WLAN_VENDOR_TI=y
+CONFIG_WLCORE=y
+CONFIG_WLCORE_SDIO=y
+CONFIG_WL12XX=y
+CONFIG_BT=y
+CONFIG_BT_HCIUART=y
+CONFIG_BT_HCIUART_LL=y
+
+# Audio: TWL6040 over McPDM, digital microphone
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SOC=y
+CONFIG_SND_SOC_OMAP_MCPDM=y
+CONFIG_SND_SOC_OMAP_DMIC=y
+CONFIG_SND_SOC_DMIC=y
+CONFIG_SND_SOC_OMAP_ABE_TWL6040=y
+CONFIG_CLK_TWL6040=y
+
+# Not on this board; they only add error lines to the boot log
+# CONFIG_MTD_OOPS is not set
+# CONFIG_CHARGER_BQ2415X is not set

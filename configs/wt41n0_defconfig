@@ -1,0 +1,75 @@
+# Zebra / Symbol WT41N0 (TI OMAP4430, Cortex-A9 x2, 512 MiB)
+#
+# Builds zImage, omap4-wt41n0.dtb, rootfs.cpio.gz and the loader, and wraps
+# them into images/wt41n0-linux.hex, the file to flash. The system runs from RAM.
+
+# Architecture
+BR2_arm=y
+BR2_cortex_a9=y
+BR2_ARM_ENABLE_NEON=y
+BR2_ARM_ENABLE_VFP=y
+BR2_ARM_FPU_NEON=y
+
+# Toolchain: prebuilt Arm GNU toolchain (glibc). Unlike the Bootlin toolchains
+# it exists for both x86-64 and arm64 build hosts.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_ARM_ARM=y
+
+# System
+BR2_TARGET_GENERIC_HOSTNAME="wt41n0"
+BR2_TARGET_GENERIC_ISSUE="WT41N0 Linux"
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+# BR2_TARGET_GENERIC_GETTY is not set
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/post-image.sh"
+
+# Kernel: mainline 6.12 LTS + board patches and device tree
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.12.58"
+BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/patches/linux"
+BR2_LINUX_KERNEL_DEFCONFIG="omap2plus"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/linux.fragment"
+BR2_LINUX_KERNEL_ZIMAGE=y
+BR2_LINUX_KERNEL_LZMA=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_CUSTOM_DTS_DIR="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/dts"
+
+# BusyBox: Buildroot's configuration plus a few applets the board uses
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_WT41N0_PATH)/board/zebra/wt41n0/busybox.fragment"
+
+# Wi-Fi and Bluetooth firmware (TI WL1283), regulatory database
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_TI_WL128X=y
+BR2_PACKAGE_WIRELESS_REGDB=y
+
+# Networking
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_DROPBEAR=y
+
+# Bluetooth: bluetoothd and bluetoothctl (the classic hciconfig / hcitool /
+# hcidump set, BR2_PACKAGE_BLUEZ5_UTILS_TOOLS, does not fit the image budget)
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+
+# Audio
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
+
+# Board packages
+BR2_PACKAGE_WT41N0_LOADER=y
+BR2_PACKAGE_WT41N0_UTILS=y
+
+# Root filesystem: initramfs loaded by the loader
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_GZIP=y
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# Host tools: fdtput, used by post-image.sh
+BR2_PACKAGE_HOST_DTC=y

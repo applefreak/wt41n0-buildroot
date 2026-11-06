@@ -1,0 +1,11 @@
+#!/bin/sh
+# Console keymap for the 23-key keypad: orange, gray and blue layers
+# (source: support/keymap.py in the BSP; type "keys" for a summary).
+case "$1" in
+start)
+	printf 'Loading keypad keymap: '
+	if loadkmap < /etc/wt41n0.bmap; then echo OK; else echo FAIL; fi
+	;;
+stop) ;;
+*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

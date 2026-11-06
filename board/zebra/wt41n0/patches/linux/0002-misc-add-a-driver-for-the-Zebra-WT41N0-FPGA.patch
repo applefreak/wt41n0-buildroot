@@ -1,0 +1,369 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:44 +0000
+Subject: [PATCH] misc: add a driver for the Zebra WT41N0 FPGA
+
+The WT41N0 has an Actel IGLOO+ FPGA on GPMC chip select 1. It contains an
+interrupt controller for 24 sources (the touch controller's pen interrupt
+is source 0), several LED outputs and the audio amplifier switch.
+
+Register the interrupt controller as an irq domain and the outputs as LED
+class devices.
+
+Upstream: not submitted
+---
+ drivers/misc/Kconfig       |   8 +
+ drivers/misc/Makefile      |   1 +
+ drivers/misc/wt41n0-fpga.c | 317 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 326 insertions(+)
+ create mode 100644 drivers/misc/wt41n0-fpga.c
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 3fe7e2a9b..341f458f3 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -628,4 +628,12 @@ source "drivers/misc/uacce/Kconfig"
+ source "drivers/misc/pvpanic/Kconfig"
+ source "drivers/misc/mchp_pci1xxxx/Kconfig"
+ source "drivers/misc/keba/Kconfig"
++config WT41N0_FPGA
++	tristate "Zebra WT41N0 FPGA (interrupt controller, LEDs)"
++	depends on OF && LEDS_CLASS
++	help
++	  Support for the Actel FPGA on the Zebra/Symbol WT41N0 handheld, attached
++	  to the OMAP4 GPMC: interrupt controller for the touch pen and other
++	  sources, keypad/decode/scan LEDs and the audio amplifier switch.
++
+ endmenu
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index a9f94525e..bfc38fe03 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -72,3 +72,4 @@ obj-$(CONFIG_TPS6594_PFSM)	+= tps6594-pfsm.o
+ obj-$(CONFIG_NSM)		+= nsm.o
+ obj-$(CONFIG_MARVELL_CN10K_DPI)	+= mrvl_cn10k_dpi.o
+ obj-y				+= keba/
++obj-$(CONFIG_WT41N0_FPGA)	+= wt41n0-fpga.o
+diff --git a/drivers/misc/wt41n0-fpga.c b/drivers/misc/wt41n0-fpga.c
+new file mode 100644
+index 000000000..57c405282
+--- /dev/null
++++ b/drivers/misc/wt41n0-fpga.c
+@@ -0,0 +1,317 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Zebra/Symbol WT41N0 Actel FPGA on the OMAP4 GPMC.
++ *
++ * Register map: docs/hardware.md in the WT41N0 Buildroot BSP. There are three
++ * 16-bit register blocks inside the 16 MiB chip-select window:
++ *   S = +0x20000  interrupt controller, LEDs, beeper, audio PA
++ *   X = +0x80000  misc
++ *   Y = +0xC0000  boot status / misc
++ * Even offsets are write-1-to-set, odd+1 offsets write-1-to-clear.
++ *
++ * Interrupt controller: status bytes A..D at S+0x08/0x0A/0x0C/0x0E (write a
++ * bit to acknowledge it); global control S+0x10 (set) / S+0x12 (clear), bit 7
++ * enables the FPGA interrupt output, which goes to an OMAP GPIO (rising edge).
++ * Each of the 24 sources has an enable bit in a block set/clear register pair.
++ *
++ * This driver provides: an irq_chip/domain for the 24 sources (used by the
++ * SX8650 touch controller, source 0), LED class devices, and the audio PA switch.
++ */
++#include <linux/bitops.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/irq.h>
++#include <linux/irqdomain.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/platform_device.h>
++
++#define FPGA_S		0x20000
++#define FPGA_X		0x80000
++#define FPGA_Y		0xC0000
++
++#define S_IRQ_STATUS_A	(FPGA_S + 0x08)		/* A, B, C, D at +0, +2, +4, +6 */
++#define S_GLOBAL_SET	(FPGA_S + 0x10)
++#define S_GLOBAL_CLR	(FPGA_S + 0x12)
++#define GLOBAL_IRQ_EN	0x80
++#define GLOBAL_WAKE_EN	0x40
++
++#define S_LED_KBD_SET	(FPGA_S + 0x18)		/* bit2 CTRL LED, bit0 FUNC LED */
++#define S_LED_KBD_CLR	(FPGA_S + 0x1A)
++#define S_LED_SET	(FPGA_S + 0x28)		/* bit1 DECODE (green), bit2 SCAN */
++#define S_LED_CLR	(FPGA_S + 0x2A)
++#define S_AUDIO_SET	(FPGA_S + 0x98)		/* bit3 audio PA */
++#define S_AUDIO_CLR	(FPGA_S + 0x9A)
++
++#define WT41N0_FPGA_NR_IRQS	24
++
++/* Interrupt sources: status byte and bit, enable set/clear register, enable value. */
++struct fpga_irq_src {
++	u8 status;		/* 0..3 = A..D */
++	u8 bit;
++	u32 set_reg;		/* offset in the window of the enable "set" register */
++	u8 enable;
++};
++
++static const struct fpga_irq_src fpga_irq_srcs[WT41N0_FPGA_NR_IRQS] = {
++	{ 0, 0, FPGA_S + 0x14, 0x80 },	/* 0: touch pen */
++	{ 0, 1, FPGA_S + 0x14, 0x08 },
++	{ 0, 2, FPGA_S + 0x18, 0x80 },
++	{ 0, 3, FPGA_S + 0x48, 0x80 },
++	{ 0, 4, FPGA_S + 0x38, 0x08 },
++	{ 1, 0, FPGA_S + 0x4C, 0x80 },
++	{ 1, 1, FPGA_S + 0x38, 0x80 },
++	{ 1, 2, FPGA_S + 0x50, 0x80 },
++	{ 1, 3, FPGA_S + 0x50, 0x10 },
++	{ 1, 6, FPGA_S + 0x3C, 0x80 },
++	{ 1, 7, FPGA_S + 0x34, 0x80 },
++	{ 2, 0, FPGA_X + 0x18, 0x80 },	/* 11: accessory serial wake */
++	{ 2, 1, FPGA_X + 0x14, 0x80 },
++	{ 2, 2, FPGA_X + 0x14, 0x10 },
++	{ 2, 4, FPGA_X + 0x18, 0x10 },
++	{ 3, 0, FPGA_Y + 0x14, 0x20 },
++	{ 3, 1, FPGA_Y + 0x14, 0x80 },
++	{ 3, 2, FPGA_Y + 0x14, 0x04 },
++	{ 3, 7, FPGA_S + 0x1C, 0x80 },
++	{ 3, 5, FPGA_S + 0x20, 0x80 },
++	{ 3, 6, FPGA_S + 0x2C, 0x80 },
++	{ 2, 5, FPGA_X + 0x14, 0x02 },	/* 21: FPGA I2C master */
++	{ 3, 4, FPGA_S + 0x58, 0x80 },
++	{ 3, 3, FPGA_S + 0x60, 0x80 },
++};
++
++struct wt41n0_fpga {
++	struct device *dev;
++	void __iomem *base;
++	struct irq_domain *domain;
++	int parent_irq;
++	u32 enabled;			/* mask of enabled sources */
++};
++
++static inline u16 fpga_rd(struct wt41n0_fpga *f, u32 off)
++{
++	return readw(f->base + off);
++}
++
++static inline void fpga_wr(struct wt41n0_fpga *f, u32 off, u16 val)
++{
++	writew(val, f->base + off);
++}
++
++/* ---- LEDs ------------------------------------------------------------------ */
++
++struct fpga_led {
++	struct led_classdev cdev;
++	struct wt41n0_fpga *fpga;
++	u32 set_reg;
++	u16 mask;
++};
++
++static void fpga_led_set(struct led_classdev *cdev, enum led_brightness b)
++{
++	struct fpga_led *led = container_of(cdev, struct fpga_led, cdev);
++
++	fpga_wr(led->fpga, b ? led->set_reg : led->set_reg + 2, led->mask);
++}
++
++static const struct { const char *name; u32 set_reg; u16 mask; const char *trigger; } fpga_leds[] = {
++	{ "wt41n0:green:decode", S_LED_SET, BIT(1), "heartbeat" },
++	{ "wt41n0:red:scan",     S_LED_SET, BIT(2), NULL },
++	{ "wt41n0:ctrl",         S_LED_KBD_SET, BIT(2), NULL },
++	{ "wt41n0:func",         S_LED_KBD_SET, BIT(0), NULL },
++	{ "wt41n0:audio-pa",     S_AUDIO_SET, BIT(3), NULL },
++};
++
++static int fpga_leds_init(struct wt41n0_fpga *f)
++{
++	int i, ret;
++
++	for (i = 0; i < ARRAY_SIZE(fpga_leds); i++) {
++		struct fpga_led *led = devm_kzalloc(f->dev, sizeof(*led), GFP_KERNEL);
++
++		if (!led)
++			return -ENOMEM;
++		led->fpga = f;
++		led->set_reg = fpga_leds[i].set_reg;
++		led->mask = fpga_leds[i].mask;
++		led->cdev.name = fpga_leds[i].name;
++		led->cdev.brightness_set = fpga_led_set;
++		led->cdev.max_brightness = 1;
++		led->cdev.default_trigger = fpga_leds[i].trigger;
++		fpga_led_set(&led->cdev, LED_OFF);
++		ret = devm_led_classdev_register(f->dev, &led->cdev);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++/* ---- interrupt controller --------------------------------------------------- */
++
++static void fpga_irq_mask(struct irq_data *d)
++{
++	struct wt41n0_fpga *f = irq_data_get_irq_chip_data(d);
++	const struct fpga_irq_src *s = &fpga_irq_srcs[d->hwirq];
++
++	f->enabled &= ~BIT(d->hwirq);
++	fpga_wr(f, s->set_reg + 2, s->enable);
++}
++
++static void fpga_irq_unmask(struct irq_data *d)
++{
++	struct wt41n0_fpga *f = irq_data_get_irq_chip_data(d);
++	const struct fpga_irq_src *s = &fpga_irq_srcs[d->hwirq];
++
++	f->enabled |= BIT(d->hwirq);
++	/* acknowledge anything stale, then enable */
++	fpga_wr(f, S_IRQ_STATUS_A + 2 * s->status, BIT(s->bit));
++	fpga_wr(f, s->set_reg, s->enable);
++}
++
++static int fpga_irq_set_type(struct irq_data *d, unsigned int type)
++{
++	/* The FPGA latches events itself; every source is handled as an edge. */
++	return 0;
++}
++
++static struct irq_chip fpga_irq_chip = {
++	.name		= "wt41n0-fpga",
++	.irq_mask	= fpga_irq_mask,
++	.irq_unmask	= fpga_irq_unmask,
++	.irq_set_type	= fpga_irq_set_type,
++	.flags		= IRQCHIP_SKIP_SET_WAKE,
++};
++
++static int fpga_irq_map(struct irq_domain *dom, unsigned int virq, irq_hw_number_t hw)
++{
++	irq_set_chip_data(virq, dom->host_data);
++	irq_set_chip_and_handler(virq, &fpga_irq_chip, handle_simple_irq);
++	irq_set_nested_thread(virq, 1);
++	irq_set_noprobe(virq);
++	return 0;
++}
++
++static const struct irq_domain_ops fpga_irq_domain_ops = {
++	.map	= fpga_irq_map,
++	.xlate	= irq_domain_xlate_twocell,
++};
++
++static irqreturn_t fpga_irq_thread(int irq, void *data)
++{
++	struct wt41n0_fpga *f = data;
++	irqreturn_t ret = IRQ_NONE;
++	u16 status[4];
++	int i, pass;
++
++	/* Mask the FPGA output while handling the sources; re-enabling it
++	 * at the end produces a new rising edge if anything is still pending. */
++	fpga_wr(f, S_GLOBAL_CLR, GLOBAL_IRQ_EN);
++	for (pass = 0; pass < 8; pass++) {
++		bool any = false;
++
++		for (i = 0; i < 4; i++)
++			status[i] = fpga_rd(f, S_IRQ_STATUS_A + 2 * i) & 0xff;
++		for (i = 0; i < WT41N0_FPGA_NR_IRQS; i++) {
++			const struct fpga_irq_src *s = &fpga_irq_srcs[i];
++
++			if (!(status[s->status] & BIT(s->bit)))
++				continue;
++			/* acknowledge, then deliver if enabled */
++			fpga_wr(f, S_IRQ_STATUS_A + 2 * s->status, BIT(s->bit));
++			if (f->enabled & BIT(i)) {
++				handle_nested_irq(irq_find_mapping(f->domain, i));
++				ret = IRQ_HANDLED;
++			}
++			any = true;
++		}
++		if (!any)
++			break;
++	}
++	fpga_wr(f, S_GLOBAL_SET, GLOBAL_IRQ_EN);
++	return ret;
++}
++
++static int fpga_irq_init(struct wt41n0_fpga *f)
++{
++	int i, ret;
++
++	/* all sources off, all status cleared, output enabled */
++	for (i = 0; i < WT41N0_FPGA_NR_IRQS; i++)
++		fpga_wr(f, fpga_irq_srcs[i].set_reg + 2, fpga_irq_srcs[i].enable);
++	for (i = 0; i < 4; i++)
++		fpga_wr(f, S_IRQ_STATUS_A + 2 * i, 0xff);
++	fpga_wr(f, S_GLOBAL_CLR, GLOBAL_IRQ_EN | GLOBAL_WAKE_EN);
++
++	f->domain = irq_domain_add_linear(f->dev->of_node, WT41N0_FPGA_NR_IRQS,
++					  &fpga_irq_domain_ops, f);
++	if (!f->domain)
++		return -ENOMEM;
++
++	f->parent_irq = of_irq_get(f->dev->of_node, 0);
++	if (f->parent_irq <= 0) {
++		dev_warn(f->dev, "no parent interrupt, FPGA irqs unavailable\n");
++		return 0;
++	}
++	ret = devm_request_threaded_irq(f->dev, f->parent_irq, NULL, fpga_irq_thread,
++					IRQF_ONESHOT | IRQF_TRIGGER_RISING, "wt41n0-fpga", f);
++	if (ret) {
++		dev_err(f->dev, "cannot request parent irq %d: %d\n", f->parent_irq, ret);
++		return ret;
++	}
++	fpga_wr(f, S_GLOBAL_SET, GLOBAL_IRQ_EN);
++	return 0;
++}
++
++static int wt41n0_fpga_probe(struct platform_device *pdev)
++{
++	struct wt41n0_fpga *f;
++	struct resource *res;
++	int ret;
++
++	f = devm_kzalloc(&pdev->dev, sizeof(*f), GFP_KERNEL);
++	if (!f)
++		return -ENOMEM;
++	f->dev = &pdev->dev;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
++		return -EINVAL;
++	/* map only the first MiB: all known registers are below +0x100000 */
++	f->base = devm_ioremap(&pdev->dev, res->start, 0x100000);
++	if (!f->base)
++		return -ENOMEM;
++	platform_set_drvdata(pdev, f);
++
++	dev_dbg(&pdev->dev, "FPGA at %pa: S+0=%04x status A-D %04x %04x %04x %04x global %04x\n",
++		 &res->start, fpga_rd(f, FPGA_S), fpga_rd(f, S_IRQ_STATUS_A),
++		 fpga_rd(f, S_IRQ_STATUS_A + 2), fpga_rd(f, S_IRQ_STATUS_A + 4),
++		 fpga_rd(f, S_IRQ_STATUS_A + 6), fpga_rd(f, S_GLOBAL_SET));
++
++	ret = fpga_irq_init(f);
++	if (ret)
++		return ret;
++	ret = fpga_leds_init(f);
++	if (ret)
++		return ret;
++	return 0;
++}
++
++static const struct of_device_id wt41n0_fpga_of_match[] = {
++	{ .compatible = "zebra,wt41n0-fpga" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, wt41n0_fpga_of_match);
++
++static struct platform_driver wt41n0_fpga_driver = {
++	.probe = wt41n0_fpga_probe,
++	.driver = {
++		.name = "wt41n0-fpga",
++		.of_match_table = wt41n0_fpga_of_match,
++	},
++};
++module_platform_driver(wt41n0_fpga_driver);
++
++MODULE_DESCRIPTION("Zebra WT41N0 FPGA interrupt controller and LEDs");
++MODULE_LICENSE("GPL");

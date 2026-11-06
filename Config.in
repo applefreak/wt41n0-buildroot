@@ -1,0 +1,65 @@
+menu "WT41N0 board options"
+
+config BR2_WT41N0_LOCAL_DIR
+	string "directory with local, private files"
+	default "$(BR2_EXTERNAL_WT41N0_PATH)/local"
+	help
+	  Optional files that are copied into the image when present.
+	  The directory is ignored by git, so nothing in it is shared.
+
+	    wifi.conf                   wpa_supplicant configuration
+	    authorized_keys             ssh public keys for root
+	    dropbear_ed25519_host_key   fixed ssh host key
+
+config BR2_WT41N0_RNG_SEED
+	bool "random seed in the device tree"
+	default y
+	help
+	  Put 64 random bytes from the build machine into the device
+	  tree (/chosen/rng-seed). The kernel uses them as initial
+	  entropy, so its random number generator is ready at once.
+
+	  Without a seed the generator needs about a minute to collect
+	  enough entropy on this board (its only clock source is a
+	  32 kHz counter), and ssh does not answer until then.
+
+	  Every boot of one image starts from the same seed, mixed with
+	  timing entropy gathered while it runs. Treat the image file
+	  as secret anyway: it also holds the Wi-Fi passphrase and the
+	  ssh host key from local/.
+
+choice
+	prompt "boot verbosity"
+	default BR2_WT41N0_BOOT_VERBOSE
+	help
+	  How much the unit shows on its LCD while it starts.
+
+config BR2_WT41N0_BOOT_QUIET
+	bool "quiet"
+	help
+	  The loader's progress screen stays until the shell prompt
+	  appears. The kernel only prints
+	  errors (quiet loglevel=3) and the start-up scripts log to
+	  /var/log/boot.log, showing a line on the LCD only when one of
+	  them fails.
+
+config BR2_WT41N0_BOOT_VERBOSE
+	bool "verbose"
+	help
+	  Kernel messages (loglevel=7) scroll on the LCD as the system
+	  starts, followed by one line per start-up script. The default.
+
+config BR2_WT41N0_BOOT_DEBUG
+	bool "debug"
+	help
+	  Everything: the loader shows its diagnostic screen (image
+	  sizes and a register dump), the kernel is built with the LCD
+	  low-level debug console and prints from its first instruction
+	  (earlyprintk keep_bootcon ignore_loglevel).
+
+endchoice
+
+endmenu
+
+source "$BR2_EXTERNAL_WT41N0_PATH/package/wt41n0-loader/Config.in"
+source "$BR2_EXTERNAL_WT41N0_PATH/package/wt41n0-utils/Config.in"

@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:46 +0000
+Subject: [PATCH] Bluetooth: hci_sync: use controllers that refuse LE commands
+ as BR/EDR only
+
+The TI WL1283 advertises LE in its LMP features, but with its init script
+(TIInit_10.6.15.bts) it answers LE Read Supported States with Command
+Disallowed, which aborts the whole controller initialisation. When a
+dual-mode controller refuses LE commands this way, clear the LE feature
+bit and continue as a BR/EDR-only controller.
+
+Upstream: not submitted
+---
+ net/bluetooth/hci_sync.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/net/bluetooth/hci_sync.c b/net/bluetooth/hci_sync.c
+index f79b38603..8504c458a 100644
+--- a/net/bluetooth/hci_sync.c
++++ b/net/bluetooth/hci_sync.c
+@@ -4039,8 +4039,21 @@ static int hci_init2_sync(struct hci_dev *hdev)
+ 
+ 	if (lmp_le_capable(hdev)) {
+ 		err = hci_init_stage_sync(hdev, le_init2);
++		/* Some dual-mode controllers advertise LE in their LMP features
++		 * but refuse LE commands with "Command Disallowed" (for example
++		 * the TI WL1283 with an init script that has no LE support).
++		 * Use them as BR/EDR-only controllers instead of failing the
++		 * whole initialisation.
++		 */
++		if (err == -EBUSY && lmp_bredr_capable(hdev)) {
++			bt_dev_warn(hdev, "LE commands disallowed; using the controller as BR/EDR only");
++			hdev->features[0][4] &= ~LMP_LE;
++			err = 0;
++		}
+ 		if (err)
+ 			return err;
++		if (!lmp_le_capable(hdev))
++			return 0;
+ 		/* LE-only controllers have LE implicitly enabled */
+ 		if (!lmp_bredr_capable(hdev))
+ 			hci_dev_set_flag(hdev, HCI_LE_ENABLED);

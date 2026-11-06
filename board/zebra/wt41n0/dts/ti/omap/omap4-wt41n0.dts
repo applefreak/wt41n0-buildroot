@@ -1,0 +1,532 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Zebra / Symbol WT41N0 wearable terminal (TI OMAP4430 ES2.3, 512 MiB).
+ *
+ * The board is started by the Symbol monitor through a small loader, not by
+ * U-Boot: pads, DDR, the display controller and the LCD are left as the stock
+ * bootloader configured them, and this file relies on that state. There are
+ * deliberately almost no pinmux entries.
+ *
+ * Hardware reference: docs/hardware.md in the WT41N0 Buildroot BSP.
+ */
+/dts-v1/;
+
+#include "omap443x.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	model = "Zebra WT41N0";
+	compatible = "zebra,wt41n0", "ti,omap4430", "ti,omap4";
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x20000000>;
+	};
+
+	aliases {
+		serial2 = &uart3;
+		display0 = &framebuffer;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		remoteproc_region: remoteproc@96b00000 {
+			reg = <0x96b00000 0x500000>;
+			no-map;
+		};
+
+		/* 0x25800 bytes of framebuffer plus the scratch block of the
+		 * low-level LCD debug console, rounded up to 256 KiB. */
+		framebuffer_region: framebuffer@9b000000 {
+			reg = <0x9b000000 0x40000>;
+			no-map;
+		};
+	};
+
+	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;		/* required so the framebuffer reg becomes a resource */
+		stdout-path = "display0";
+		/*
+		 * Fixed part of the command line; the BSP's post-image script
+		 * appends the verbosity options and sets linux,initrd-end.
+		 *  - cpuidle.off=1: no broadcast clockevent yet, deep idle
+		 *    states lose timers.
+		 *  - fbcon rotate:3: the 320x240 panel is scanned out of a
+		 *    240x320 buffer rotated by 90 degrees.
+		 *  - clk_ignore_unused / pd_ignore_unused: the display runs on
+		 *    clocks and domains the bootloader enabled; never gate them.
+		 */
+		bootargs = "cpuidle.off=1 console=tty1 fbcon=font:VGA8x8,rotate:3 clk_ignore_unused pd_ignore_unused";
+		linux,initrd-start = <0x89000000>;
+		linux,initrd-end = <0x89000000>;	/* set by post-image */
+
+		framebuffer: framebuffer@9b000000 {
+			compatible = "simple-framebuffer";
+			reg = <0x9b000000 0x25800>;
+			width = <240>;
+			height = <320>;
+			stride = <480>;
+			format = "r5g6b5";
+			/* Hold every DSS clock the bootloader left running. */
+			clocks = <&l3_dss_clkctrl OMAP4_DSS_CORE_CLKCTRL 0>,
+				 <&l3_dss_clkctrl OMAP4_DSS_CORE_CLKCTRL 8>,
+				 <&l3_dss_clkctrl OMAP4_DSS_CORE_CLKCTRL 9>,
+				 <&l3_dss_clkctrl OMAP4_DSS_CORE_CLKCTRL 10>,
+				 <&l3_dss_clkctrl OMAP4_DSS_CORE_CLKCTRL 11>;
+			power-domains = <&prm_dss>;
+		};
+	};
+
+	/* LCD backlight: timer 9 PWM at 180 Hz from the 38.4 MHz system
+	 * clock, high time = brightness, 2 to 98 % duty. */
+	pwm9: pwm-9 {
+		compatible = "ti,omap-dmtimer-pwm";
+		#pwm-cells = <3>;
+		ti,timers = <&timer9>;
+		ti,clock-source = <0x00>;		/* OMAP_TIMER_SRC_SYS_CLK */
+		pinctrl-names = "default";
+		pinctrl-0 = <&backlight_pwm_pins>;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm9 0 5555555 0>;	/* 180 Hz */
+		brightness-levels = <0 2 5 10 15 20 25 30 35 40 45 50 55 60 66 75 85 98>;
+		default-brightness-level = <14>;	/* 66 % */
+	};
+
+	/* WL1283 Wi-Fi enable, OMAP GPIO 100 */
+	wlan_en_reg: regulator-wlan-en {
+		compatible = "regulator-fixed";
+		regulator-name = "wlan-en";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&gpio4 4 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <70000>;
+		enable-active-high;
+	};
+
+	/*
+	 * Audio: TWL6040 over McPDM. The built-in speaker hangs off the
+	 * codec's AUXL/AUXR line outputs through an external amplifier; the
+	 * handsfree class-D outputs are not connected. Speaker audio is McPDM
+	 * channels 3 and 4. Headset on HSOL/HSOR, built-in microphone on DMIC1.
+	 */
+	sound: sound {
+		compatible = "ti,abe-twl6040";
+		ti,model = "WT41N0";
+		ti,jack-detection;
+		ti,mclk-freq = <38400000>;
+		ti,mcpdm = <&mcpdm>;
+		ti,dmic = <&dmic>;
+		ti,twl6040 = <&twl6040>;
+		ti,audio-routing =
+			"Headset Stereophone", "HSOL",
+			"Headset Stereophone", "HSOR",
+			/* built-in speaker (external amplifier on the AUX outputs) */
+			"Line Out", "AUXL",
+			"Line Out", "AUXR",
+			"HSMIC", "Headset Mic",
+			"Headset Mic", "Headset Mic Bias";
+		/* the DMIC routes are added by the machine driver itself */
+	};
+};
+
+/*
+ * Keep the kernel away from the display subsystem: probing the DSS target
+ * module resets it and gates its clocks, which blanks the LCD. The panel keeps
+ * running as the bootloader set it up and is used through simple-framebuffer.
+ */
+&{/ocp/target-module@58000000} {
+	status = "disabled";
+};
+
+/* ---- PMIC and audio codec on I2C1 ------------------------------------------ */
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	twl: twl@48 {
+		reg = <0x48>;
+		/* IRQ_SYS_1N cascaded to the GIC */
+		interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
+		system-power-controller;
+		#clock-cells = <1>;	/* 0 = clk32kg, 1 = clk32kaudio */
+	};
+
+	twl6040: twl@4b {
+		compatible = "ti,twl6040";
+		#clock-cells = <0>;
+		reg = <0x4b>;
+		/* IRQ_SYS_2N */
+		interrupts = <GIC_SPI 119 IRQ_TYPE_LEVEL_HIGH>;
+		/* codec power enable: GPIO 104 */
+		ti,audpwron-gpio = <&gpio4 8 GPIO_ACTIVE_HIGH>;
+		vio-supply = <&v1v8>;
+		v2v1-supply = <&v2v1>;
+		enable-active-high;
+		/* The codec does not power up without the PMIC's CLK32KAUDIO. */
+		clocks = <&twl 1>;
+		clock-names = "clk32k";
+	};
+};
+
+#include "omap4-mcpdm.dtsi"
+#include "twl6030.dtsi"
+#include "twl6030_omap4.dtsi"
+
+/* Power button on the PMIC's PWRON pin: KEY_POWER input events. */
+&twl {
+	pwrbutton {
+		compatible = "ti,twl6030-pwrbutton";
+		interrupts = <0>;		/* PWRON */
+	};
+};
+
+/*
+ * Keep every PMIC rail as the bootloader left it. Which rails feed the LCD
+ * panel, eMMC and radio is not fully mapped, and the regulator framework's
+ * "disable unused" pass blanks the panel otherwise.
+ */
+&vaux1 {
+	regulator-always-on;
+};
+
+&vaux2 {
+	regulator-always-on;
+};
+
+/* VAUX3: off in the bootloader state, programmed to 2.8 V, consumer unknown.
+ * Its voltage selector is outside the driver's table, so leave it alone. */
+&vaux3 {
+	status = "disabled";
+};
+
+&vmmc {
+	regulator-always-on;
+};
+
+&vpp {
+	regulator-always-on;
+};
+
+&vusim {
+	regulator-always-on;
+};
+
+&vdac {
+	regulator-always-on;
+};
+
+&vana {
+	regulator-always-on;
+};
+
+&vcxio {
+	regulator-always-on;
+};
+
+&vusb {
+	regulator-always-on;
+};
+
+&v1v8 {
+	regulator-always-on;
+};
+
+&v2v1 {
+	regulator-always-on;
+};
+
+/* ---- other I2C buses ----------------------------------------------------- */
+
+&i2c2 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	/* Interrupt line unknown: IIO raw reads only. */
+	accelerometer@1c {
+		compatible = "fsl,mma8452";
+		reg = <0x1c>;
+	};
+};
+
+/* Nothing known on I2C3. */
+&i2c3 {
+	status = "okay";
+	clock-frequency = <400000>;
+};
+
+&i2c4 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	/* External Agent MCU (Atmel XMEGA): body LEDs, battery and charger
+	 * manager, wake timer. Driver: drivers/leds/leds-wt41n0-ea.c. */
+	ea@42 {
+		compatible = "zebra,wt41n0-ea";
+		reg = <0x42>;
+	};
+
+	/* Resistive touch controller, pen interrupt = FPGA source 0. Units
+	 * without a touch panel just fail this probe. */
+	touchscreen@49 {
+		compatible = "semtech,sx8650";
+		reg = <0x49>;
+		interrupt-parent = <&fpga>;
+		interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
+	};
+};
+
+/* ---- keypad ---------------------------------------------------------------- */
+
+/*
+ * OMAP4 keypad controller, 8x8 matrix. Generated by support/keymap.py --dts.
+ * The colour layers (letters, symbols) are a console keymap loaded at boot,
+ * not part of this table.
+ */
+&keypad {
+	status = "okay";
+	keypad,num-rows = <8>;
+	keypad,num-columns = <8>;
+	linux,input-no-autorepeat;
+	linux,keymap = <
+		MATRIX_KEY(3, 7, 1)	/* ESC */
+		MATRIX_KEY(2, 7, 15)	/* MENU_TAB */
+		MATRIX_KEY(1, 7, 29)	/* ALT_CTRL */
+		MATRIX_KEY(0, 7, 42)	/* SHIFT */
+		MATRIX_KEY(3, 6, 56)	/* BLUE */
+		MATRIX_KEY(0, 0, 2)	/* K1_AB */
+		MATRIX_KEY(2, 2, 3)	/* K2_CD */
+		MATRIX_KEY(1, 2, 4)	/* K3_EF */
+		MATRIX_KEY(3, 5, 5)	/* K4_GH */
+		MATRIX_KEY(3, 4, 6)	/* K5_IJ */
+		MATRIX_KEY(3, 3, 7)	/* K6_KL */
+		MATRIX_KEY(2, 5, 8)	/* K7_MN */
+		MATRIX_KEY(2, 4, 9)	/* K8_OP */
+		MATRIX_KEY(1, 0, 10)	/* K9_QR */
+		MATRIX_KEY(1, 5, 14)	/* SPACE_ST */
+		MATRIX_KEY(1, 4, 11)	/* K0_UV */
+		MATRIX_KEY(1, 3, 103)	/* ARROW_WX */
+		MATRIX_KEY(0, 3, 108)	/* ARROW_YZ */
+		MATRIX_KEY(0, 5, 100)	/* BIG_ORANGE */
+		MATRIX_KEY(0, 4, 58)	/* BIG_GRAY */
+		MATRIX_KEY(2, 6, 53)	/* P1 */
+		MATRIX_KEY(1, 6, 52)	/* P2 */
+		MATRIX_KEY(0, 6, 28)	/* ENTER */
+	>;
+};
+
+/* ---- storage, Wi-Fi, Bluetooth, USB, UART ---------------------------------- */
+
+/*
+ * eMMC on MMC2 (8-bit, VAUX1 at 3.0 V). It holds the Symbol monitor, its
+ * partition layout and this OS image: treat it as read-only unless you know
+ * the layout.
+ */
+&mmc2 {
+	status = "okay";
+	vmmc-supply = <&vaux1>;
+	bus-width = <8>;
+	ti,non-removable;
+	non-removable;
+	no-sd;
+	no-sdio;
+};
+
+/* TI WL1283 Wi-Fi on MMC4: IRQ GPIO 45, 26 MHz reference. */
+&mmc4 {
+	status = "okay";
+	vmmc-supply = <&wlan_en_reg>;
+	bus-width = <4>;
+	ti,non-removable;
+	non-removable;
+	cap-power-off-card;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	wlcore: wlcore@2 {
+		compatible = "ti,wl1283";
+		reg = <2>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <13 IRQ_TYPE_LEVEL_HIGH>;	/* OMAP GPIO 45 */
+		ref-clock-frequency = <26000000>;
+		tcxo-clock-frequency = <26000000>;
+	};
+};
+
+/* TI WL1283 Bluetooth on UART1. Needs the init script TIInit_10.6.15.bts;
+ * post-image.sh disables this node when the image has none. */
+&uart1 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "ti,wl1283-st";
+		enable-gpios = <&gpio4 7 GPIO_ACTIVE_HIGH>;	/* OMAP GPIO 103 */
+		max-speed = <3000000>;
+	};
+};
+
+&uart3 {
+	status = "okay";
+};
+
+&twl_usb_comparator {
+	usb-supply = <&vusb>;
+};
+
+/* USB device port (cradle / cable). High-speed enumeration fails on this
+ * port (ep0 SetupEnd errors); full speed is reliable. */
+&usb_otg_hs {
+	interface-type = <1>;
+	mode = <3>;
+	power = <50>;
+	maximum-speed = "full-speed";
+};
+
+/* ---- FPGA ------------------------------------------------------------------ */
+
+/*
+ * FPGA (Actel IGLOO+) on GPMC CS1: 16 MiB window at 0x02000000, 16-bit,
+ * address/data multiplexed, interrupt output on GPIO 9. The timings give
+ * CONFIG1..6 = 0x01801110 0x00141801 0x33070715 0x0E079718 0x00171418
+ * 0x8D080000. Driver: drivers/misc/wt41n0-fpga.c.
+ */
+&gpmc {
+	status = "okay";
+	ranges = <1 0 0x02000000 0x01000000>;	/* CS1 */
+
+	fpga: fpga@1,0 {
+		compatible = "zebra,wt41n0-fpga";
+		reg = <1 0 0x1000000>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <9 IRQ_TYPE_EDGE_RISING>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		gpmc,device-width = <2>;
+		gpmc,mux-add-data = <1>;		/* AAD multiplexed */
+		/*
+		 * CONFIG1 bit 4 set: one count = 2 x 5 ns fclk ticks. The -ns
+		 * values below are raw 5 ns ticks, because the GPMC driver
+		 * ignores the granularity bit when it converts them.
+		 */
+		gpmc,time-para-granularity;
+		gpmc,cs-on-ns = <5>;
+		gpmc,cs-rd-off-ns = <120>;
+		gpmc,cs-wr-off-ns = <100>;
+		gpmc,adv-aad-mux-on-ns = <5>;
+		gpmc,adv-on-ns = <25>;
+		gpmc,adv-rd-off-ns = <35>;
+		gpmc,adv-wr-off-ns = <35>;
+		gpmc,adv-aad-mux-rd-off-ns = <15>;
+		gpmc,adv-aad-mux-wr-off-ns = <15>;
+		gpmc,oe-on-ns = <40>;
+		gpmc,oe-aad-mux-on-ns = <5>;
+		gpmc,oe-off-ns = <115>;
+		gpmc,oe-aad-mux-off-ns = <20>;
+		gpmc,we-on-ns = <35>;
+		gpmc,we-off-ns = <70>;
+		gpmc,rd-cycle-ns = <120>;
+		gpmc,wr-cycle-ns = <100>;
+		gpmc,access-ns = <115>;
+		gpmc,wr-access-ns = <65>;
+		gpmc,wr-data-mux-bus-ns = <40>;
+	};
+};
+
+/* ---- GPIO outputs ---------------------------------------------------------- */
+
+/*
+ * GPIO outputs the bootloader drives. The kernel resets the GPIO modules, so
+ * these hogs restore the bootloader state. GPIO 41 is the FPGA enable (low
+ * holds the FPGA in reset, which also blanks the LCD panel). The purpose of the
+ * other lines is unknown; they are kept at their bootloader levels. The
+ * bootloader also drives GPIO 122 high (backlight full on); that pad is muxed
+ * to the timer 9 PWM output instead.
+ */
+&gpio1 {
+	boot-high-hog {
+		gpio-hog;
+		gpios = <11 GPIO_ACTIVE_HIGH>, <12 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "bootloader-high";
+	};
+	boot-low-hog {
+		gpio-hog;
+		gpios = <13 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "bootloader-low";
+	};
+};
+
+&gpio2 {
+	boot-high-hog {
+		gpio-hog;
+		gpios = <9 GPIO_ACTIVE_HIGH>;		/* gpio 41 */
+		output-high;
+		line-name = "fpga-enable";
+	};
+	boot-low-hog {
+		gpio-hog;
+		gpios = <16 GPIO_ACTIVE_HIGH>;		/* gpio 48 */
+		output-low;
+		line-name = "bootloader-low";
+	};
+};
+
+&gpio3 {
+	boot-low-hog {
+		gpio-hog;
+		gpios = <17 GPIO_ACTIVE_HIGH>, <19 GPIO_ACTIVE_HIGH>;	/* gpio 81, 83 */
+		output-low;
+		line-name = "bootloader-low";
+	};
+};
+
+&gpio6 {
+	boot-high-hog {
+		gpio-hog;
+		gpios = <3 GPIO_ACTIVE_HIGH>, <24 GPIO_ACTIVE_HIGH>;	/* gpio 163, 184 */
+		output-high;
+		line-name = "bootloader-high";
+	};
+	boot-low-hog {
+		gpio-hog;
+		gpios = <27 GPIO_ACTIVE_HIGH>, <28 GPIO_ACTIVE_HIGH>;	/* gpio 187, 188 */
+		output-low;
+		line-name = "bootloader-low";
+	};
+};
+
+/* ---- pin multiplexing ------------------------------------------------------- */
+
+&omap4_pmx_core {
+	/* abe_dmic_din3 (gpio_122) carries dmtimer9_pwm_evt in mux mode 5. */
+	backlight_pwm_pins: backlight-pwm-pins {
+		pinctrl-single,pins = <
+			OMAP4_IOPAD(0x116, PIN_OUTPUT | MUX_MODE5)	/* abe_dmic_din3.dmtimer9_pwm_evt */
+		>;
+	};
+
+	dmic_pins: dmic-pins {
+		pinctrl-single,pins = <
+			OMAP4_IOPAD(0x110, PIN_OUTPUT | MUX_MODE0)		/* abe_dmic_clk1 */
+			OMAP4_IOPAD(0x112, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_dmic_din1 */
+		>;
+	};
+};
+
+&dmic {
+	pinctrl-names = "default";
+	pinctrl-0 = <&dmic_pins>;
+	status = "okay";
+};

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Route playback to the built-in speaker: handsfree DAC -> AUX line outputs ->
+# external amplifier. Volume from /etc/default/wt41n0.
+. /etc/default/wt41n0
+set_ctl() { amixer -q cset name="$1" "$2" >/dev/null 2>&1; }
+case "$1" in
+start)
+	printf 'Setting up audio: '
+	if [ ! -e /proc/asound/card0 ]; then echo "FAIL (no sound card)"; exit 1; fi
+	set_ctl 'Handsfree Left Playback' 'HF DAC' &&
+	set_ctl 'Handsfree Right Playback' 'HF DAC' &&
+	set_ctl 'AUXL Playback Switch' on &&
+	set_ctl 'AUXR Playback Switch' on &&
+	set_ctl 'Handsfree Playback Volume' "${SPEAKER_VOLUME:-8},${SPEAKER_VOLUME:-8}" &&
+	echo OK || echo FAIL
+	;;
+stop) ;;
+*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

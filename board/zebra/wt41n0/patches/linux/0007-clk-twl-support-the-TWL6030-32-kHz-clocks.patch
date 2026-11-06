@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:46 +0000
+Subject: [PATCH] clk: twl: support the TWL6030 32 kHz clocks
+
+On the TWL6030, a resource obeys state commands only for the power groups
+it is assigned to, and the command carries the groups. Assign CLK32KG and
+CLK32KAUDIO to all groups and add the group bits to the state commands.
+twl-core creates the clock device when the twl node has #clock-cells.
+
+The TWL6040 audio codec does not power up without CLK32KAUDIO.
+
+Upstream: not submitted
+---
+ drivers/clk/clk-twl.c  | 26 +++++++++++++++++++++++---
+ drivers/mfd/twl-core.c | 16 ++++++++++++++++
+ 2 files changed, 39 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/clk/clk-twl.c b/drivers/clk/clk-twl.c
+index eab9d3c8e..3f8d76313 100644
+--- a/drivers/clk/clk-twl.c
++++ b/drivers/clk/clk-twl.c
+@@ -11,7 +11,12 @@
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ 
++#define VREG_GRP                0
+ #define VREG_STATE              2
++/* TWL6030 (not 6032): resources obey state commands only for the power groups
++ * they are assigned to, and the command carries the groups in bits 7:5. */
++#define TWL6030_GRP_ALL         0x07
++#define TWL6030_CFG_STATE_GRP_SHIFT 5
+ #define TWL6030_CFG_STATE_OFF   0x00
+ #define TWL6030_CFG_STATE_ON    0x01
+ #define TWL6030_CFG_STATE_MASK  0x03
+@@ -19,6 +24,7 @@
+ struct twl_clock_info {
+ 	struct device *dev;
+ 	u8 base;
++	bool has_groups;	/* TWL6030 */
+ 	struct clk_hw hw;
+ };
+ 
+@@ -56,10 +62,19 @@ static unsigned long twl_clks_recalc_rate(struct clk_hw *hw,
+ static int twl6032_clks_prepare(struct clk_hw *hw)
+ {
+ 	struct twl_clock_info *cinfo = to_twl_clks_info(hw);
++	u8 state = TWL6030_CFG_STATE_ON;
+ 	int ret;
+ 
+-	ret = twlclk_write(cinfo, TWL_MODULE_PM_RECEIVER, VREG_STATE,
+-			   TWL6030_CFG_STATE_ON);
++	if (cinfo->has_groups) {
++		ret = twlclk_write(cinfo, TWL_MODULE_PM_RECEIVER, VREG_GRP,
++				   TWL6030_GRP_ALL);
++		if (ret < 0) {
++			dev_err(cinfo->dev, "clk group assignment failed\n");
++			return ret;
++		}
++		state |= TWL6030_GRP_ALL << TWL6030_CFG_STATE_GRP_SHIFT;
++	}
++	ret = twlclk_write(cinfo, TWL_MODULE_PM_RECEIVER, VREG_STATE, state);
+ 	if (ret < 0)
+ 		dev_err(cinfo->dev, "clk prepare failed\n");
+ 
+@@ -72,7 +87,8 @@ static void twl6032_clks_unprepare(struct clk_hw *hw)
+ 	int ret;
+ 
+ 	ret = twlclk_write(cinfo, TWL_MODULE_PM_RECEIVER, VREG_STATE,
+-			   TWL6030_CFG_STATE_OFF);
++			   TWL6030_CFG_STATE_OFF | (cinfo->has_groups ?
++			   TWL6030_GRP_ALL << TWL6030_CFG_STATE_GRP_SHIFT : 0));
+ 	if (ret < 0)
+ 		dev_err(cinfo->dev, "clk unprepare failed\n");
+ }
+@@ -154,6 +170,7 @@ static int twl_clks_probe(struct platform_device *pdev)
+ 
+ 	for (i = 0; i < count; i++) {
+ 		cinfo[i].base = hw_data[i].base;
++		cinfo[i].has_groups = platform_get_device_id(pdev)->driver_data;
+ 		cinfo[i].dev = &pdev->dev;
+ 		cinfo[i].hw.init = &hw_data[i].init;
+ 		ret = devm_clk_hw_register(&pdev->dev, &cinfo[i].hw);
+@@ -177,6 +194,9 @@ static int twl_clks_probe(struct platform_device *pdev)
+ static const struct platform_device_id twl_clks_id[] = {
+ 	{
+ 		.name = "twl6032-clk",
++	}, {
++		.name = "twl6030-clk",	/* same clocks, with power groups */
++		.driver_data = 1,
+ 	}, {
+ 		/* sentinel */
+ 	}
+diff --git a/drivers/mfd/twl-core.c b/drivers/mfd/twl-core.c
+index c130ffef1..1de3e48b5 100644
+--- a/drivers/mfd/twl-core.c
++++ b/drivers/mfd/twl-core.c
+@@ -715,6 +715,11 @@ static const struct mfd_cell twl6032_cells[] = {
+ 	{ .name = "twl6032-clk" },
+ };
+ 
++/* CLK32KG / CLK32KAUDIO of the plain TWL6030 (e.g. the TWL6040 codec's 32 kHz) */
++static const struct mfd_cell twl6030_cells[] = {
++	{ .name = "twl6030-clk" },
++};
++
+ /* NOTE: This driver only handles a single twl4030/tps659x0 chip */
+ static int
+ twl_probe(struct i2c_client *client)
+@@ -871,6 +876,17 @@ twl_probe(struct i2c_client *client)
+ 			goto free;
+ 	}
+ 
++	if (id->driver_data == TWL6030_CLASS &&
++	    of_property_present(node, "#clock-cells")) {
++		status = devm_mfd_add_devices(&client->dev,
++					      PLATFORM_DEVID_NONE,
++					      twl6030_cells,
++					      ARRAY_SIZE(twl6030_cells),
++					      NULL, 0, NULL);
++		if (status < 0)
++			goto free;
++	}
++
+ 	if (twl_class_is_6030()) {
+ 		if (of_device_is_system_power_controller(node)) {
+ 			if (!pm_power_off)

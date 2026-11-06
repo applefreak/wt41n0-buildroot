@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:44 +0000
+Subject: [PATCH] leds: add a driver for the Zebra WT41N0 External Agent LEDs
+
+The "External Agent" microcontroller on I2C4 at 0x42 drives the body LEDs
+of the WT41N0: two green LEDs and a red/green LED. Register them as LED
+class devices with the microcontroller's hardware blink.
+
+Upstream: not submitted
+---
+ drivers/leds/Kconfig          |   6 ++
+ drivers/leds/Makefile         |   1 +
+ drivers/leds/leds-wt41n0-ea.c | 123 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 130 insertions(+)
+ create mode 100644 drivers/leds/leds-wt41n0-ea.c
+
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+index b784bb74a..d08528d8c 100644
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -973,4 +973,10 @@ source "drivers/leds/trigger/Kconfig"
+ comment "Simple LED drivers"
+ source "drivers/leds/simple/Kconfig"
+ 
++config LEDS_WT41N0_EA
++	tristate "Zebra WT41N0 External Agent MCU LEDs"
++	depends on LEDS_CLASS && I2C && OF
++	help
++	  LEDs driven by the External Agent microcontroller of the Zebra WT41N0.
++
+ endif # NEW_LEDS
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+index 18afbb5a2..69bf8a399 100644
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -119,3 +119,4 @@ obj-y					+= blink/
+ 
+ # Simple LED drivers
+ obj-y					+= simple/
++obj-$(CONFIG_LEDS_WT41N0_EA)		+= leds-wt41n0-ea.o
+diff --git a/drivers/leds/leds-wt41n0-ea.c b/drivers/leds/leds-wt41n0-ea.c
+new file mode 100644
+index 000000000..d9f664dde
+--- /dev/null
++++ b/drivers/leds/leds-wt41n0-ea.c
+@@ -0,0 +1,123 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Zebra WT41N0 "External Agent" microcontroller (Atmel XMEGA) on I2C4 at 0x42.
++ * Every access is a register byte followed by data. LED registers
++ * (see docs/hardware.md in the WT41N0 Buildroot BSP):
++ *   0x10/0x11 LED1 pattern/duration, 0x12/0x13 LED2 (right, green),
++ *   0x14/0x15 LED3 (left); bi-colour (middle) LED: 0x16 colour (1 red, 2 green),
++ *   0x17 pattern (0x01 solid, 0xf1 blink, 0 off), 0x18 duration.
++ * pattern 0x0f + duration 0xff = solid on, pattern 0xff = blink, 0/0 = off.
++ * Reg 0x01: firmware version (3 bytes). The MCU also owns battery, charger
++ * limits, wake timer and warm boot; those registers are not handled here.
++ */
++#include <linux/i2c.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/of.h>
++
++#define EA_REG_VERSION	0x01
++
++struct ea_led {
++	struct led_classdev cdev;
++	struct i2c_client *client;
++	u8 pattern_reg;
++	u8 colour;		/* bi-colour LED only: 1 red, 2 green */
++};
++
++static const struct { const char *name; u8 reg; u8 colour; } ea_leds[] = {
++	{ "wt41n0:led1",         0x10, 0 },
++	{ "wt41n0:green:right",  0x12, 0 },
++	{ "wt41n0:green:left",   0x14, 0 },
++	{ "wt41n0:red:middle",   0x17, 1 },
++	{ "wt41n0:green:middle", 0x17, 2 },
++};
++
++static int ea_wr(struct i2c_client *c, u8 reg, u8 val)
++{
++	return i2c_smbus_write_byte_data(c, reg, val);
++}
++
++static int ea_led_write(struct ea_led *led, bool on, bool blink)
++{
++	int ret;
++
++	if (led->colour) {
++		/* bi-colour: colour register 0x16, pattern 0x17, duration 0x18 */
++		ret = ea_wr(led->client, 0x18, 0xff);
++		if (!ret && on)
++			ret = ea_wr(led->client, 0x16, led->colour);
++		if (!ret)
++			ret = ea_wr(led->client, 0x17, on ? (blink ? 0xf1 : 0x01) : 0);
++		return ret;
++	}
++	ret = ea_wr(led->client, led->pattern_reg, on ? (blink ? 0xff : 0x0f) : 0);
++	if (ret)
++		return ret;
++	return ea_wr(led->client, led->pattern_reg + 1, on ? 0xff : 0);
++}
++
++static int ea_led_set(struct led_classdev *cdev, enum led_brightness b)
++{
++	struct ea_led *led = container_of(cdev, struct ea_led, cdev);
++
++	return ea_led_write(led, b != 0, false);
++}
++
++static int ea_led_blink(struct led_classdev *cdev, unsigned long *on, unsigned long *off)
++{
++	struct ea_led *led = container_of(cdev, struct ea_led, cdev);
++
++	/* one hardware blink rate only */
++	*on = *off = 500;
++	return ea_led_write(led, true, true);
++}
++
++static int ea_probe(struct i2c_client *client)
++{
++	u8 ver[3] = {};
++	int i, ret;
++
++	ret = i2c_smbus_read_i2c_block_data(client, EA_REG_VERSION, 3, ver);
++	if (ret != 3)
++		return dev_err_probe(&client->dev, ret < 0 ? ret : -EIO,
++				     "cannot read the firmware version\n");
++	dev_info(&client->dev, "External Agent firmware %u.%u.%u\n", ver[0], ver[1], ver[2]);
++
++	for (i = 0; i < ARRAY_SIZE(ea_leds); i++) {
++		struct ea_led *led = devm_kzalloc(&client->dev, sizeof(*led), GFP_KERNEL);
++
++		if (!led)
++			return -ENOMEM;
++		led->client = client;
++		led->pattern_reg = ea_leds[i].reg;
++		led->colour = ea_leds[i].colour;
++		led->cdev.name = ea_leds[i].name;
++		led->cdev.max_brightness = 1;
++		led->cdev.brightness_set_blocking = ea_led_set;
++		led->cdev.blink_set = ea_led_blink;
++		ea_led_write(led, false, false);
++		ret = devm_led_classdev_register(&client->dev, &led->cdev);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static const struct of_device_id ea_of_match[] = {
++	{ .compatible = "zebra,wt41n0-ea" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, ea_of_match);
++
++static const struct i2c_device_id ea_id[] = { { "wt41n0-ea" }, { } };
++MODULE_DEVICE_TABLE(i2c, ea_id);
++
++static struct i2c_driver ea_driver = {
++	.driver = { .name = "wt41n0-ea", .of_match_table = ea_of_match },
++	.probe = ea_probe,
++	.id_table = ea_id,
++};
++module_i2c_driver(ea_driver);
++
++MODULE_DESCRIPTION("Zebra WT41N0 External Agent MCU LEDs");
++MODULE_LICENSE("GPL");

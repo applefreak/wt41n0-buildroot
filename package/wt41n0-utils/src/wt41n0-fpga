@@ -1,0 +1,33 @@
+#!/bin/sh
+# wt41n0-fpga: show the FPGA's register blocks (see docs/hardware.md, "FPGA").
+#
+# Usage: wt41n0-fpga          print the S, X and Y block registers
+#        wt41n0-fpga pen      print the touch pen level (S+0x14 bit 5) for 10 s
+#
+# Read-only: the kernel driver (wt41n0-fpga) owns the chip select and interrupts.
+# The FPGA's outputs are LED class devices: /sys/class/leds/wt41n0:*.
+S=0x02020000; X=0x02080000; Y=0x020C0000
+
+dump() {	# dump <name> <base> <offsets...>
+	name=$1; base=$2; shift 2
+	printf '%s block (%s):' "$name" "$base"
+	for off in "$@"; do printf ' +%s=%s' "$off" "$(devmem $((base + off)) 16)"; done
+	echo
+}
+
+case "${1:-}" in
+"")
+	dump S $S 0x00 0x02 0x04 0x08 0x0A 0x0C 0x0E 0x10 0x14 0x18 0x28 0x38 0x48 0x4C 0x50 0x94 0x98
+	dump X $X 0x10 0x14 0x18
+	dump Y $Y 0x00 0x04 0x14
+	;;
+pen)
+	i=0
+	while [ $i -lt 20 ]; do
+		echo "pen $(( ($(devmem $((S + 0x14)) 16) >> 5) & 1 ))"
+		usleep 500000; i=$((i + 1))
+	done
+	;;
+*)
+	echo "usage: $0 [pen]" >&2; exit 1 ;;
+esac

@@ -1,0 +1,12 @@
+#!/bin/sh
+# udhcpc hook: show a newly obtained address on the LCD (see /etc/default/wt41n0).
+. /etc/default/wt41n0
+[ "$SHOW_ADDRESS" = yes ] || exit 0
+case "$1" in
+bound|renew)
+	last=/var/run/address.$interface
+	[ "$(cat $last 2>/dev/null)" = "$ip" ] && exit 0
+	echo "$ip" > $last
+	printf '\n%s: %s\n' "$interface" "$ip" > /dev/tty1
+	;;
+esac

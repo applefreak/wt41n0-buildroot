@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WT41N0 USB Flasher</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+    --accent: #2f6fdf; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --err: #c0392b;
+    --bar: #e6e9ef; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b2029; --text: #e5e9f0; --muted: #98a2b3; --line: #2c3340;
+      --accent: #5b8ff0; --accent-text: #0d1117; --ok: #4cc38a; --warn: #e3a33a; --err: #f07167;
+      --bar: #2a303c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+  h2 .n {
+    display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-text); font-size: 12px; font-weight: 700;
+  }
+  ol { margin: 0; padding-left: 20px; color: var(--muted); }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 8px; padding: 18px; text-align: center;
+    color: var(--muted); cursor: pointer;
+  }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  .drop input { display: none; }
+  .facts { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 10px; white-space: pre-wrap; }
+  button {
+    font: inherit; padding: 8px 16px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .progress { height: 10px; background: var(--bar); border-radius: 5px; overflow: hidden; margin: 12px 0 6px; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .stat { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  .status { font-weight: 600; margin-top: 10px; }
+  .status.ok { color: var(--ok); } .status.warn { color: var(--warn); } .status.err { color: var(--err); }
+  pre#log {
+    margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 12px;
+    color: var(--muted); white-space: pre-wrap; word-break: break-word;
+  }
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  code { font-family: var(--mono); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WT41N0 USB Flasher</h1>
+  <p class="lead">Sends a Symbol HEX image to a Zebra / Symbol WT41N0 in download mode, like
+    <code>support/flash.py</code>. Needs a Chromium-based browser (Chrome, Edge) and this page
+    opened from <code>localhost</code> or HTTPS.</p>
+
+  <section id="unsupported" hidden>
+    <div class="status err">This browser has no WebUSB support.</div>
+    <div class="note">Use Chrome or Edge, and open the page through <code>http://localhost</code>
+      (for example <code>python3 -m http.server</code> in this folder) or HTTPS.</div>
+  </section>
+
+  <section>
+    <h2><span class="n">1</span>Choose the image</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".hex">
+      <span id="dropText">Drop <code>wt41n0-linux.hex</code> here, or click to choose a file</span>
+    </label>
+    <div class="facts" id="fileFacts"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Put the unit in download mode</h2>
+    <ol>
+      <li>Hold <b>P1</b> or <b>P2</b> while switching the unit on.</li>
+      <li>Choose <b>Download from USB</b> and connect the USB cable or cradle.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Flash</h2>
+    <div class="row">
+      <button class="primary" id="flash" disabled>Connect and flash</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <div class="progress"><div id="bar"></div></div>
+    <div class="stat" id="stat">&nbsp;</div>
+    <div class="status" id="status"></div>
+    <div class="note">Keep the cable connected until the transfer finishes. The unit then stores
+      the image; it does not restart by itself, so power-cycle it afterwards.</div>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+// Download protocol of the Symbol monitor (same as support/flash.py):
+// claim the interface that has a bulk OUT and a bulk IN endpoint, send the HEX
+// file in 1024-byte writes, and before every write after the first wait for an
+// XON byte (0x11) on bulk IN (XOFF 0x13 means "paused"). Finish with a
+// zero-length write.
+const VENDOR_ID = 0x05e0, PRODUCT_ID = 0x200b;
+const CHUNK = 1024, XON = 0x11, XOFF = 0x13;
+
+const $ = id => document.getElementById(id);
+let image = null, fileName = "", stopRequested = false, busy = false;
+
+function log(text) { const l = $("log"); l.textContent += text + "\n"; l.scrollTop = l.scrollHeight; }
+function status(text, kind = "") { const s = $("status"); s.textContent = text; s.className = "status " + kind; }
+const hex = (v, w = 2) => "0x" + v.toString(16).toUpperCase().padStart(w, "0");
+
+// ---- Symbol HEX validation --------------------------------------------------
+// ":CCAAAATT<data>SS". Record types below 0x80 carry hex text, 0x80 and above
+// raw bytes. Every record's checksum is checked, as flash.py does.
+function hexVal(buf, pos, len) {
+  let v = 0;
+  for (let i = 0; i < len; i++) {
+    const c = buf[pos + i], d = c <= 57 ? c - 48 : (c | 32) - 87;
+    if (d < 0 || d > 15 || Number.isNaN(d)) throw new Error(`bad hex digit at ${hex(pos + i, 1)}`);
+    v = v * 16 + d;
+  }
+  return v;
+}
+function validate(buf) {
+  let off = 0, records = 0, header = null, eof = false;
+  while (off < buf.length) {
+    if (buf[off] !== 58) throw new Error(`expected a record at ${hex(off, 1)}`);
+    const count = hexVal(buf, off + 1, 2), type = hexVal(buf, off + 7, 2);
+    const size = type >= 0x80 ? count : count * 2;
+    const start = off + 9, chk = start + size;
+    if (chk + 2 > buf.length) throw new Error(`truncated record at ${hex(off, 1)}`);
+    let next = chk + 2;
+    if (buf[next] === 13 && buf[next + 1] === 10) next += 2;
+    else if (buf[next] === 10) next += 1;
+    else throw new Error(`invalid line ending at ${hex(off, 1)}`);
+    const expected = hexVal(buf, chk, 2);
+    let sum = 0;
+    if (type >= 0x80) { for (let i = off + 1; i < chk; i++) sum += buf[i]; }
+    else {
+      sum = count + hexVal(buf, off + 3, 2) + hexVal(buf, off + 5, 2) + type;
+      for (let i = 0; i < count; i++) sum += hexVal(buf, start + i * 2, 2);
+    }
+    if (((-sum) & 0xFF) !== expected) throw new Error(`checksum mismatch at ${hex(off, 1)}`);
+    if (type === 0xA0 && size >= 10) header = hexVal(buf, start + 2, 8);
+    if (type === 0x01) eof = true;
+    records++;
+    off = next;
+  }
+  if (!eof) throw new Error("no end-of-file record");
+  return { records, imageSize: header };
+}
+
+async function loadFile(file) {
+  image = null; $("flash").disabled = true; $("fileFacts").textContent = "";
+  fileName = file.name;
+  const buf = new Uint8Array(await file.arrayBuffer());
+  try {
+    const info = validate(buf);
+    image = buf;
+    $("dropText").innerHTML = "";
+    $("dropText").append(document.createTextNode(file.name));
+    $("fileFacts").textContent =
+      `${(buf.length / 1e6).toFixed(2)} MB, ${info.records.toLocaleString()} records, all checksums OK` +
+      (info.imageSize ? `\nimage size in header: ${(info.imageSize / 1e6).toFixed(2)} MB` : "");
+    log(`validated ${file.name}: ${buf.length} bytes, ${info.records} records`);
+    status("");
+    $("flash").disabled = busy || !navigator.usb;
+  } catch (e) {
+    status(`${file.name} is not a valid Symbol HEX image: ${e.message}`, "err");
+    log(`validation failed: ${e.message}`);
+  }
+}
+
+// ---- USB ------------------------------------------------------------------------
+function findEndpoints(device) {
+  for (const iface of device.configuration.interfaces) {
+    for (const alt of iface.alternates) {
+      const out = alt.endpoints.find(e => e.direction === "out" && e.type === "bulk");
+      const inn = alt.endpoints.find(e => e.direction === "in" && e.type === "bulk");
+      if (out && inn) return { iface, alt, out, inn };
+    }
+  }
+  throw new Error("no interface with both a bulk OUT and a bulk IN endpoint");
+}
+
+async function waitForXon(device, ep) {
+  let paused = false;
+  for (;;) {
+    if (stopRequested) throw new Error("stopped");
+    const r = await device.transferIn(ep.endpointNumber, Math.max(ep.packetSize, 64));
+    if (r.status === "stall") { await device.clearHalt("in", ep.endpointNumber); continue; }
+    const bytes = new Uint8Array(r.data ? r.data.buffer : new ArrayBuffer(0));
+    for (const b of bytes) {
+      if (b === XON) return;
+      if (b === XOFF && !paused) { paused = true; log("device paused the transfer (XOFF)"); }
+    }
+  }
+}
+
+async function flash() {
+  if (!image) return;
+  busy = true; stopRequested = false;
+  $("flash").disabled = true; $("stop").disabled = false;
+  $("bar").style.width = "0%"; $("stat").innerHTML = "&nbsp;";
+  let device;
+  try {
+    status("Choose the WT41N0 in the browser's device list…");
+    device = await navigator.usb.requestDevice({ filters: [{ vendorId: VENDOR_ID, productId: PRODUCT_ID }] });
+    log(`device: ${device.productName || "(no name)"} ${hex(device.vendorId, 4)}:${hex(device.productId, 4)}`);
+    await device.open();
+    if (device.configuration === null) await device.selectConfiguration(1);
+    const { iface, alt, out, inn } = findEndpoints(device);
+    log(`interface ${iface.interfaceNumber}: class ${hex(alt.interfaceClass)} subclass ${hex(alt.interfaceSubclass)} ` +
+        `protocol ${hex(alt.interfaceProtocol)}, bulk OUT ${hex(out.endpointNumber)} (${out.packetSize} B), ` +
+        `bulk IN ${hex(inn.endpointNumber | 0x80)} (${inn.packetSize} B)`);
+    await device.claimInterface(iface.interfaceNumber);
+    if (alt.alternateSetting !== 0) await device.selectAlternateInterface(iface.interfaceNumber, alt.alternateSetting);
+
+    status("Sending…");
+    const t0 = performance.now();
+    let sent = 0, lastUi = 0;
+    while (sent < image.length) {
+      if (stopRequested) throw new Error("stopped");
+      if (sent) await waitForXon(device, inn);
+      const chunk = image.subarray(sent, sent + CHUNK);
+      const r = await device.transferOut(out.endpointNumber, chunk);
+      if (r.status !== "ok" || r.bytesWritten !== chunk.length)
+        throw new Error(`short USB write: ${r.bytesWritten}/${chunk.length} bytes (${r.status})`);
+      sent += chunk.length;
+      const now = performance.now();
+      if (now - lastUi > 100 || sent === image.length) {
+        lastUi = now;
+        const secs = (now - t0) / 1000, rate = sent / Math.max(secs, 0.001);
+        const left = (image.length - sent) / rate;
+        $("bar").style.width = (100 * sent / image.length).toFixed(1) + "%";
+        $("stat").textContent = `${(sent / 1e6).toFixed(2)} / ${(image.length / 1e6).toFixed(2)} MB  ·  ` +
+          `${(rate / 1e3).toFixed(0)} kB/s  ·  ${secs.toFixed(0)} s elapsed, about ${left.toFixed(0)} s left`;
+      }
+    }
+    await new Promise(r => setTimeout(r, 50));
+    await device.transferOut(out.endpointNumber, new Uint8Array(0));
+    const total = ((performance.now() - t0) / 1000).toFixed(0);
+    log(`sent ${sent} bytes in ${total} s; end of file sent`);
+    status(`Done. ${fileName} was sent; the unit is storing it. Power-cycle the unit when its screen says it is finished.`, "ok");
+  } catch (e) {
+    if (e.name === "NotFoundError") { status("No device chosen.", "warn"); log("device selection cancelled"); }
+    else if (e.name === "SecurityError") {
+      status("The browser blocked access to this device.", "err");
+      log(`SecurityError: ${e.message}. Chrome refuses some USB device classes; see the interface class above.`);
+    } else if (e.name === "NetworkError" || /claim/i.test(e.message)) {
+      status("Could not open the device. Is another program (flash.py) using it? On Windows, bind the WinUSB driver with Zadig.", "err");
+      log(`${e.name}: ${e.message}`);
+    } else {
+      status(e.message === "stopped" ? "Stopped. The unit did not receive a complete image; flash again." : `Transfer failed: ${e.message}`,
+             e.message === "stopped" ? "warn" : "err");
+      log(`${e.name}: ${e.message}`);
+    }
+  } finally {
+    try { if (device && device.opened) await device.close(); } catch (_) {}
+    busy = false; $("stop").disabled = true; $("flash").disabled = !image || !navigator.usb;
+  }
+}
+
+// ---- wiring ---------------------------------------------------------------------
+if (!navigator.usb) $("unsupported").hidden = false;
+$("file").addEventListener("change", e => e.target.files[0] && loadFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
+$("flash").addEventListener("click", flash);
+$("stop").addEventListener("click", () => { stopRequested = true; status("Stopping…", "warn"); });
+window.addEventListener("beforeunload", e => { if (busy) { e.preventDefault(); e.returnValue = ""; } });
+</script>
+</body>
+</html>

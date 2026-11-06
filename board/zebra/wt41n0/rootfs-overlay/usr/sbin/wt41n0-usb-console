@@ -1,0 +1,10 @@
+#!/bin/sh
+# Root shell on the USB serial gadget (ttyGS0), started and respawned by init.
+# Wait until a host has configured the gadget, then run the shell in this same
+# process: init already made it a session leader, so opening the port makes it
+# the shell's controlling terminal. (Do not use setsid here: as a session leader
+# it forks and exits, init respawns the script, and shells pile up on the port.)
+until [ "$(cat /sys/class/udc/*/state 2>/dev/null)" = configured ] && [ -c /dev/ttyGS0 ]; do
+	sleep 2
+done
+exec /bin/sh -l </dev/ttyGS0 >/dev/ttyGS0 2>&1

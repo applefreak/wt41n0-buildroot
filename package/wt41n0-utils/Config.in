@@ -1,0 +1,10 @@
+config BR2_PACKAGE_WT41N0_UTILS
+	bool "wt41n0-utils"
+	help
+	  Small board tools for the WT41N0:
+
+	    pcmtest         play a test tone or record, straight through
+	                    the kernel PCM interface (no ALSA library)
+	    wt41n0-fpga     print the FPGA registers, the touch pen level
+	    wt41n0-survey   collect logs and hardware state (read-only)
+	    keys            show the keypad layers

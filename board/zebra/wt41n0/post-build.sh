@@ -1,0 +1,82 @@
+#!/bin/sh
+# Buildroot post-build script for the WT41N0: finish the target tree.
+#   $1 = target directory. BR2_CONFIG and HOST_DIR come from Buildroot.
+set -eu
+TARGET=$1
+BOARD=$(cd "$(dirname "$0")" && pwd)
+EXT=$(cd "$BOARD/../../.." && pwd)
+
+cfg_bool() { grep -q "^$1=y" "$BR2_CONFIG"; }
+cfg_str() {	# string option, with $(BR2_EXTERNAL_WT41N0_PATH) expanded
+	sed -n "s/^$1=\"\(.*\)\"$/\1/p" "$BR2_CONFIG" | sed "s|\$(BR2_EXTERNAL_WT41N0_PATH)|$EXT|g"
+}
+
+# Boot verbosity for the start-up scripts (the kernel side is in post-image.sh)
+if cfg_bool BR2_WT41N0_BOOT_QUIET; then verbosity=quiet; else verbosity=verbose; fi
+sed -i "s/^BOOT_VERBOSITY=.*/BOOT_VERBOSITY=$verbosity/" "$TARGET/etc/default/wt41n0"
+
+# Console keymap for the keypad, generated from the one table in support/keymap.py
+python3 "$EXT/support/keymap.py" --bmap > "$TARGET/etc/wt41n0.bmap"
+
+# Private files from the local directory, when present
+LOCAL=$(cfg_str BR2_WT41N0_LOCAL_DIR)
+
+# Wi-Fi: only with the user's own configuration. The wpa_supplicant package
+# ships a sample file that would join any open network; never keep that one.
+rm -f "$TARGET/etc/wpa_supplicant.conf"
+if [ -s "$LOCAL/wifi.conf" ]; then
+	install -m 0600 "$LOCAL/wifi.conf" "$TARGET/etc/wpa_supplicant.conf"
+fi
+
+# ssh: root logs in with a key; password logins work only if a root password
+# is set (BR2_TARGET_GENERIC_ROOT_PASSWD), since dropbear refuses empty ones.
+if [ -s "$LOCAL/authorized_keys" ]; then
+	install -d -m 0700 "$TARGET/root/.ssh"
+	install -m 0600 "$LOCAL/authorized_keys" "$TARGET/root/.ssh/authorized_keys"
+fi
+# A fixed host key keeps the unit's ssh identity across boots; without one
+# dropbear generates a new key at every boot (the system runs from RAM).
+rm -f "$TARGET/etc/dropbear_ed25519_host_key" "$TARGET/etc/default/dropbear"
+if [ -s "$LOCAL/dropbear_ed25519_host_key" ]; then
+	install -m 0600 "$LOCAL/dropbear_ed25519_host_key" "$TARGET/etc/dropbear_ed25519_host_key"
+	echo 'DROPBEAR_ARGS="-r /etc/dropbear_ed25519_host_key"' > "$TARGET/etc/default/dropbear"
+fi
+
+# Firmware. The linux-firmware package installs every WL128x variant; the driver
+# only loads the "fw-5" single-role and multi-role images and the WL128x NVS file
+# (fw-5-plt is for factory test mode).
+FW="$TARGET/lib/firmware/ti-connectivity"
+if [ -d "$FW" ]; then
+	find "$FW" -type f ! -name 'wl128x-fw-5-sr.bin' ! -name 'wl128x-fw-5-mr.bin' \
+		! -name 'wl128x-nvs.bin' ! -name 'TIInit_*.bts' -delete
+fi
+# Extra firmware from local/firmware/ (same layout as /lib/firmware), e.g. the
+# Bluetooth init script ti-connectivity/TIInit_10.6.15.bts, which linux-firmware
+# does not ship.
+if [ -d "$LOCAL/firmware" ]; then
+	mkdir -p "$TARGET/lib/firmware"
+	cp -R "$LOCAL/firmware/." "$TARGET/lib/firmware/"
+fi
+
+# Size: the image has to stay below 15.2 MB (docs/boot-flow.md).
+# Kernel modules: every driver the board uses is built in; the modules are
+# drivers for other OMAP boards.
+rm -rf "$TARGET/lib/modules"
+# Developer tools that packages install alongside their libraries.
+for f in gi-compile-repository gi-decompile-typelib gi-inspect-typelib pcre2grep pcre2test \
+		dbus-test-tool; do
+	rm -f "$TARGET/usr/bin/$f"
+done
+# Toolchain runtimes the prebuilt toolchain copies whether or not anything uses
+# them (C++, Fortran, OpenMP). Remove each one that no program in the image
+# links against, so adding a C++ package keeps working.
+READELF=$(ls "$HOST_DIR"/bin/*-linux-gnueabihf-readelf 2>/dev/null | head -1)
+if [ -x "$READELF" ]; then
+	needed=$(find "$TARGET" -type f \( -perm -u+x -o -name '*.so*' \) -exec "$READELF" -d {} + 2>/dev/null |
+		sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort -u)
+	for lib in libstdc++.so.6 libgfortran.so.5 libgomp.so.1 libatomic.so.1 libasan.so.8 libubsan.so.1 \
+			libgirepository-2.0.so.0; do
+		echo "$needed" | grep -qx "$lib" && continue
+		find "$TARGET/lib" "$TARGET/usr/lib" -maxdepth 1 -name "${lib%%.so*}.so*" -exec rm -f {} +
+	done
+fi

@@ -1,0 +1,10 @@
+config BR2_PACKAGE_WT41N0_LOADER
+	bool "wt41n0-loader"
+	help
+	  The small loader the Symbol monitor jumps to in place of the
+	  stock OS entry point. It turns off the L2 cache, copies the
+	  kernel, device tree and initramfs to their run addresses and
+	  starts the kernel, listing each step on the LCD. Installed as
+	  wt41n0-loader.bin in the images directory, where the post-image
+	  script picks it up.
+

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:46 +0000
+Subject: [PATCH] usb: musb: fall back to the glue device's maximum-speed
+ property
+
+musb_start() enables high speed when config->maximum_speed is unknown.
+The omap2430 glue does not pass the device tree setting on, so a port
+limited to full speed with "maximum-speed" still tried high speed (on the
+WT41N0, enumeration then fails with ep0 SetupEnd errors). When the value
+is unknown, read the property from the glue device.
+
+Upstream: not submitted
+---
+ drivers/usb/musb/musb_core.c | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
+index b24adb5b3..004005d0c 100644
+--- a/drivers/usb/musb/musb_core.c
++++ b/drivers/usb/musb/musb_core.c
+@@ -76,6 +76,7 @@
+ #include <linux/iopoll.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/usb.h>
++#include <linux/usb/ch9.h>
+ #include <linux/usb/of.h>
+ 
+ #include "musb_core.h"
+@@ -1194,11 +1195,19 @@ void musb_start(struct musb *musb)
+ 	power = MUSB_POWER_ISOUPDATE;
+ 	/*
+ 	 * treating UNKNOWN as unspecified maximum speed, in which case
+-	 * we will default to high-speed.
++	 * we will default to high-speed. Glue layers that do not pass the
++	 * setting on leave it unknown: then read the glue device's
++	 * "maximum-speed" property directly.
+ 	 */
+-	if (musb->config->maximum_speed == USB_SPEED_HIGH ||
+-			musb->config->maximum_speed == USB_SPEED_UNKNOWN)
+-		power |= MUSB_POWER_HSENAB;
++	{
++		u32 max = musb->config->maximum_speed;
++
++		if (max == USB_SPEED_UNKNOWN && musb->controller->parent)
++			max = usb_get_maximum_speed(musb->controller->parent);
++		dev_dbg(musb->controller, "maximum speed %s\n", usb_speed_string(max));
++		if (max == USB_SPEED_HIGH || max == USB_SPEED_UNKNOWN)
++			power |= MUSB_POWER_HSENAB;
++	}
+ 	musb_writeb(regs, MUSB_POWER, power);
+ 
+ 	musb->is_active = 0;

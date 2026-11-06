@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:45 +0000
+Subject: [PATCH] pwm: omap-dmtimer: defer probe until the timer device exists
+
+The timer can sit under a ti-sysc target module whose child devices are
+created after the PWM driver first probes (timer 9 on OMAP4). Return
+-EPROBE_DEFER instead of failing for good.
+
+Upstream: not submitted
+---
+ drivers/pwm/pwm-omap-dmtimer.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pwm/pwm-omap-dmtimer.c b/drivers/pwm/pwm-omap-dmtimer.c
+index 1858a7740..01087f125 100644
+--- a/drivers/pwm/pwm-omap-dmtimer.c
++++ b/drivers/pwm/pwm-omap-dmtimer.c
+@@ -322,8 +322,10 @@ static int pwm_omap_dmtimer_probe(struct platform_device *pdev)
+ 
+ 	timer_pdev = of_find_device_by_node(timer);
+ 	if (!timer_pdev) {
+-		dev_err(&pdev->dev, "Unable to find Timer pdev\n");
+-		ret = -ENODEV;
++		/* The timer can sit under a ti-sysc target module whose
++		 * children are created after this driver first probes. */
++		dev_dbg(&pdev->dev, "Timer pdev not yet available, deferring\n");
++		ret = -EPROBE_DEFER;
+ 		goto err_find_timer_pdev;
+ 	}
+ 

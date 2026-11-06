@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:45 +0000
+Subject: [PATCH] bus: ti-sysc: do not clk_put() a devm-managed child clock
+
+sysc_add_named_clock_from_child() gets the clock with
+devm_get_clk_from_child() and then calls clk_put() on it, so devres puts
+it a second time when the probe fails or defers later. This corrupts the
+clock list (oops in __clk_put(), seen with the OMAP4 McPDM pdmclk).
+
+Upstream: not submitted
+---
+ drivers/bus/ti-sysc.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/bus/ti-sysc.c b/drivers/bus/ti-sysc.c
+index f715c8d28..65b6a50c4 100644
+--- a/drivers/bus/ti-sysc.c
++++ b/drivers/bus/ti-sysc.c
+@@ -362,7 +362,12 @@ static int sysc_add_named_clock_from_child(struct sysc *ddata,
+ 	cl->clk = clock;
+ 	clkdev_add(cl);
+ 
+-	clk_put(clock);
++	/*
++	 * No clk_put() here: the clock came from devm_get_clk_from_child() and
++	 * is released by devres. Putting it here as well makes devres put it a
++	 * second time when the probe fails or defers later (hlist corruption in
++	 * __clk_put(), seen on the WT41N0 with the McPDM pdmclk).
++	 */
+ 
+ 	return 0;
+ }

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Run the start-up scripts (/etc/init.d/S??*) in order and log their output to
+# /var/log/boot.log. verbose: every line also goes to the console. quiet: only
+# the output of a script that reports a failure does.
+#
+# Each script writes to a file, never to a pipe: the daemons it starts inherit
+# that output, and an open pipe would keep this runner (and init's sysinit
+# stage, so the login shells) waiting for as long as the daemons run.
+. /etc/default/wt41n0
+LOG=/var/log/boot.log
+: > "$LOG"
+for script in /etc/init.d/S??*; do
+	[ -x "$script" ] || continue
+	out=/tmp/.boot.${script##*/}
+	"$script" start > "$out" 2>&1 < /dev/null
+	cat "$out" >> "$LOG"
+	if [ "$BOOT_VERBOSITY" != quiet ]; then
+		cat "$out" > /dev/console
+	elif grep -q -i -E 'fail|error' "$out"; then
+		{ echo "${script##*/} (full log: $LOG):"; cat "$out"; } > /dev/console
+	fi
+	rm -f "$out"
+done
+
+# Keep later kernel messages off the shell's screen (see /etc/default/wt41n0).
+[ -n "$CONSOLE_LOGLEVEL" ] && dmesg -n "$CONSOLE_LOGLEVEL"

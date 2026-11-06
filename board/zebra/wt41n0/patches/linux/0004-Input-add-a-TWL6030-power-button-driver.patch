@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Fri, 6 Nov 2026 06:01:44 +0000
+Subject: [PATCH] Input: add a TWL6030 power button driver
+
+Report the TWL6030 PWRON input as KEY_POWER. The state is read from
+STS_HW_CONDITIONS, which is 0 while the button is held. The WT41N0 power
+button is wired to this pin.
+
+Upstream: not submitted
+---
+ drivers/input/misc/Kconfig             |  5 ++
+ drivers/input/misc/Makefile            |  1 +
+ drivers/input/misc/twl6030-pwrbutton.c | 81 ++++++++++++++++++++++++++
+ 3 files changed, 87 insertions(+)
+ create mode 100644 drivers/input/misc/twl6030-pwrbutton.c
+
+diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
+index 6a852c763..3f39b1cd6 100644
+--- a/drivers/input/misc/Kconfig
++++ b/drivers/input/misc/Kconfig
+@@ -516,6 +516,11 @@ config INPUT_AXP20X_PEK
+ 	  To compile this driver as a module, choose M here. The module will
+ 	  be called axp20x-pek.
+ 
++config INPUT_TWL6030_PWRBUTTON
++	tristate "TWL6030 power button"
++	depends on TWL4030_CORE
++	help
++	  The PWRON input of the TI TWL6030 PMIC as a KEY_POWER input device.
+ 
+ config INPUT_TWL4030_PWRBUTTON
+ 	tristate "TWL4030 Power button Driver"
+diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
+index 4f7f73683..85c704bfc 100644
+--- a/drivers/input/misc/Makefile
++++ b/drivers/input/misc/Makefile
+@@ -83,6 +83,7 @@ obj-$(CONFIG_INPUT_SPARCSPKR)		+= sparcspkr.o
+ obj-$(CONFIG_INPUT_STPMIC1_ONKEY)  	+= stpmic1_onkey.o
+ obj-$(CONFIG_INPUT_TPS65218_PWRBUTTON)	+= tps65218-pwrbutton.o
+ obj-$(CONFIG_INPUT_TPS65219_PWRBUTTON)	+= tps65219-pwrbutton.o
++obj-$(CONFIG_INPUT_TWL6030_PWRBUTTON)	+= twl6030-pwrbutton.o
+ obj-$(CONFIG_INPUT_TWL4030_PWRBUTTON)	+= twl4030-pwrbutton.o
+ obj-$(CONFIG_INPUT_TWL4030_VIBRA)	+= twl4030-vibra.o
+ obj-$(CONFIG_INPUT_TWL6040_VIBRA)	+= twl6040-vibra.o
+diff --git a/drivers/input/misc/twl6030-pwrbutton.c b/drivers/input/misc/twl6030-pwrbutton.c
+new file mode 100644
+index 000000000..efdc6062c
+--- /dev/null
++++ b/drivers/input/misc/twl6030-pwrbutton.c
+@@ -0,0 +1,81 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * TWL6030 PWRON button as a KEY_POWER input device (written for the Zebra
++ * WT41N0, where the power button goes to the PMIC's PWRON pin).
++ * STS_HW_CONDITIONS (ID0 0x21) bit 1 = STS_PWRON, 0 while the button is held.
++ */
++#include <linux/errno.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/mfd/twl.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#define TWL6030_STS_HW_CONDITIONS	0x21
++#define STS_PWRON			BIT(1)
++
++static irqreturn_t twl6030_pwrbutton_irq(int irq, void *data)
++{
++	struct input_dev *input = data;
++	u8 sts;
++	int ret;
++
++	ret = twl_i2c_read_u8(TWL6030_MODULE_ID0, &sts, TWL6030_STS_HW_CONDITIONS);
++	if (ret) {
++		dev_err(input->dev.parent, "STS_HW_CONDITIONS read failed: %d\n", ret);
++		return IRQ_HANDLED;
++	}
++	input_report_key(input, KEY_POWER, !(sts & STS_PWRON));
++	input_sync(input);
++	return IRQ_HANDLED;
++}
++
++static int twl6030_pwrbutton_probe(struct platform_device *pdev)
++{
++	struct input_dev *input;
++	int irq, ret;
++
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0)
++		return irq;
++
++	input = devm_input_allocate_device(&pdev->dev);
++	if (!input)
++		return -ENOMEM;
++	input->evbit[0] = BIT_MASK(EV_KEY);
++	input->keybit[BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER);
++	input->name = "twl6030_pwrbutton";
++	input->phys = "twl6030_pwrbutton/input0";
++
++	ret = devm_request_threaded_irq(&pdev->dev, irq, NULL, twl6030_pwrbutton_irq,
++					IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING | IRQF_ONESHOT,
++					"twl6030_pwrbutton", input);
++	if (ret) {
++		dev_err(&pdev->dev, "cannot request irq %d: %d\n", irq, ret);
++		return ret;
++	}
++	ret = input_register_device(input);
++	if (ret)
++		return ret;
++	device_init_wakeup(&pdev->dev, true);
++	return 0;
++}
++
++static const struct of_device_id twl6030_pwrbutton_of_match[] = {
++	{ .compatible = "ti,twl6030-pwrbutton" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, twl6030_pwrbutton_of_match);
++
++static struct platform_driver twl6030_pwrbutton_driver = {
++	.probe = twl6030_pwrbutton_probe,
++	.driver = {
++		.name = "twl6030_pwrbutton",
++		.of_match_table = twl6030_pwrbutton_of_match,
++	},
++};
++module_platform_driver(twl6030_pwrbutton_driver);
++
++MODULE_DESCRIPTION("TWL6030 power button");
++MODULE_LICENSE("GPL");
