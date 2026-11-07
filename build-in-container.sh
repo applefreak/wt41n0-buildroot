@@ -68,7 +68,7 @@ $MAKE "${targets[@]}"
 if [ -d "$BR_OUT/images" ]; then
 	mkdir -p "$EXPORT_DIR"
 	cp -f "$BR_OUT"/images/{zImage,omap4-wt41n0.dtb,rootfs.cpio.gz,wt41n0-loader.bin} "$EXPORT_DIR"/ 2>/dev/null || true
-	cp -f "$BR_OUT"/images/wt41n0-linux.* "$BR_OUT"/images/wt41n0-emmc.* "$EXPORT_DIR"/ 2>/dev/null || true
+	cp -f "$BR_OUT"/images/wt41n0-linux.* "$BR_OUT"/images/wt41n0-emmc.* "$BR_OUT"/images/wt41n0-install.* "$EXPORT_DIR"/ 2>/dev/null || true
 	cp -f "$BR_OUT"/images/rootfs.ext2.gz "$EXPORT_DIR"/rootfs.ext4.gz 2>/dev/null || true
 	echo "== images copied to $EXPORT_DIR"; ls -la "$EXPORT_DIR"
 fi

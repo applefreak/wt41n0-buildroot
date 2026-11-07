@@ -31,13 +31,13 @@ version record, followed by plain data records.
 
 ## The loader
 
-The monitor stages the image at `0x80268000` and makes a run copy at `0x81168000`,
-then jumps to the entry in the run copy (`0x81179880`). Only the first `0x780` bytes of
-that run copy are reliable, so:
+At every boot the monitor reads a fixed `0x77F8000` bytes of the OS area (all of it but
+the last 32 KiB) to `0x80268000`, whatever the image size, switches the MMU and caches
+off and jumps to the image's first word, a branch to the entry point. (The stock
+Windows CE image is linked to run at `0x81168000`; there is no second copy there.) So:
 
-- the loader is linked for the **staging** copy (`0x80279880`),
-- its first instruction is a pc-relative jump there, and the literal it uses sits right
-  after the vector table, inside the reliable part,
+- the loader is linked for the staged copy (entry `0x80279880`); its first instruction
+  is a pc-relative jump to its linked address,
 - it checks a word-sum of itself before doing anything else.
 
 It then:
@@ -47,14 +47,15 @@ It then:
 2. cleans and disables the PL310 L2 cache through ROM service `0x102` (the monitor
    leaves it on; the kernel's decompressor only handles L1, and a live L2 makes the
    kernel start randomly),
-3. copies the kernel to `0x82008000`, the device tree to `0x88000000` and the
-   initramfs to `0x89000000`, checking magic values,
+3. copies the initramfs to `0x89000000`, the device tree to `0x88000000` and the
+   kernel to `0x82008000`, in that order (the kernel's destination lies inside a large
+   staged image), checking magic values,
 4. jumps to the kernel with `r2` = device tree address.
 
-**Size limit.** The staged image starts at `0x80268000`; the loader's stack and the
-monitor's run copy sit about 15 MB above it. The whole image (kernel + device tree +
-initramfs) therefore has to stay below 15.2 MB, and `mkhex.py` refuses anything larger.
-The default image is about 11 MB. A root filesystem on eMMC is the way past this limit.
+**Size limit.** The image can use what the monitor loads: `0x77F8000` bytes (125.8 MB),
+ending at `0x87A60000`. The loader's stack (top `0x88000000`), the device tree and the
+initramfs destinations lie above that; `mkhex.py` refuses a larger image, and the
+loader accepts an initramfs of up to 64 MiB. A 57 MB image has been booted on hardware.
 
 `post-image.sh` writes the matching `linux,initrd-start` / `linux,initrd-end` and the
 kernel command line into the device tree, and `mkhex.py` refuses to build an image
@@ -70,6 +71,10 @@ initramfs:
   ext4 root at `/dev/mmcblk1p1` and switches to it; otherwise it stays in the RAM
   system as the recovery system. The eMMC has no partition table Linux could read;
   `blkdevparts=mmcblk1:1687M@201M(rootfs)` on the command line defines the partition.
+- **Installer** (`wt41n0-install.hex`): the eMMC system's image with `wt41n0.install`
+  on the command line. When the root partition holds no ext2/3/4 file system, `/init`
+  first creates one and copies the initramfs into it (`wt41n0-install-root --self`),
+  then boots it. With a root file system present it behaves like `wt41n0-emmc.hex`.
 
 A running system can install either image into the OS area itself (`wt41n0-update`),
 which is what download mode does too.
@@ -90,6 +95,7 @@ written accordingly:
 ## Emulation
 
 `support/emulate_loader.py` runs the loader in a CPU emulator with the monitor's memory
-layout, including the truncated run copy, and checks the hand-off to the kernel. A broken
+layout (the whole image staged at `0x80268000` and entered there) and checks the
+hand-off to the kernel. A broken
 loader leaves the unit with a blank or frozen screen, so run it after any loader change
 (`pip install unicorn`). `post-image.sh` runs it automatically when the module is installed.

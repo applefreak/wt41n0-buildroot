@@ -17,11 +17,11 @@
  */
 
 /*
- * The Symbol monitor stages the OS image at 0x80268000 and places a run copy
- * at 0x81168000, jumping to the OS entry 0x81179880. Only the first 0x780
- * bytes of the run copy are reliable, so this loader is linked for the
- * STAGING copy of itself (0x80268000 + 0x11880 = 0x80279880) and the entry
- * stub jumps there. See docs/boot-flow.md.
+ * The Symbol monitor reads the whole OS area (0x77F8000 bytes) to 0x80268000
+ * and enters the image there with the MMU off. This loader is linked for that
+ * staging copy (0x80268000 + 0x11880 = 0x80279880); its entry stub is a
+ * pc-relative jump, so it also works when entered at another copy. See
+ * docs/boot-flow.md.
  */
 .equ staging_base, 0x80268000
 .equ entry_offset, 0x11880
@@ -30,14 +30,13 @@
 .equ kernel_addr, 0x82008000
 .equ dtb_addr, 0x88000000
 .equ initrd_addr, 0x89000000
-.equ stack_top, 0x81100000
+.equ stack_top, 0x88000000        /* above the staged image, below the DTB */
 .equ pl310_base, 0x48242000
 .equ lcd_state, 0x9B025800
 
 .align 5
 exception_vectors:
-    ldr pc, reset_address       /* literal kept here: only the first 0x780 bytes
-                                   of the monitor's run copy are intact */
+    ldr pc, reset_address       /* to the linked address, wherever entered */
     b undefined_instruction
     b supervisor_call
     b prefetch_abort
@@ -395,19 +394,25 @@ l2_done:
     mov r2, #12
     bl draw_hex32
 
-    ldr r0, =kernel_copy_text
+    ldr r0, =initrd_copy_text
     mov r1, #22
     mov r2, #0
     bl draw_string
 #else
-    ldr r0, =kernel_copy_text
+    ldr r0, =initrd_copy_text
     mov r1, #6
     bl draw_progress
 #endif
+    /* The kernel's destination lies inside the staged image (the monitor stages
+       up to 120 MiB from 0x80268000), so copy the initramfs and the device tree
+       out first: their destinations are above the staged image. The blob holds
+       zImage (r7 bytes), device tree (r8), initramfs (r9), after a 12-byte header. */
     ldr r12, =blob_base
     add r3, r12, #12
-    mov r5, r7
-    ldr r4, =kernel_addr
+    add r3, r3, r7
+    add r3, r3, r8
+    mov r5, r9
+    ldr r4, =initrd_addr
     bl copy
 
 #ifdef LOADER_DIAGNOSTIC
@@ -420,6 +425,9 @@ l2_done:
     mov r1, #7
     bl draw_progress
 #endif
+    ldr r12, =blob_base
+    add r3, r12, #12
+    add r3, r3, r7
     mov r5, r8
     ldr r4, =dtb_addr
     bl copy
@@ -427,15 +435,17 @@ l2_done:
 #ifdef LOADER_DIAGNOSTIC
     ldr r6, =0xF81F
     bl fill_screen
-    ldr r0, =initrd_copy_text
+    ldr r0, =kernel_copy_text
     bl draw_stage
 #else
-    ldr r0, =initrd_copy_text
+    ldr r0, =kernel_copy_text
     mov r1, #8
     bl draw_progress
 #endif
-    mov r5, r9
-    ldr r4, =initrd_addr
+    ldr r12, =blob_base
+    add r3, r12, #12
+    mov r5, r7
+    ldr r4, =kernel_addr
     bl copy
 
 #ifdef LOADER_DIAGNOSTIC

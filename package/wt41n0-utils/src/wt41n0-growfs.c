@@ -9,6 +9,7 @@
  *
  * Exits 0 when the file system already fills the device.
  */
+#include <endian.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,6 +24,42 @@
 #define EXT4_IOC_RESIZE_FS _IOW('f', 16, uint64_t)
 #endif
 
+/*
+ * The file system's size in blocks, from the superblock on the device. (statvfs's
+ * f_blocks leaves out the metadata overhead, so it cannot tell whether the file
+ * system already fills the device.)
+ */
+static int fs_blocks(unsigned int maj, unsigned int min, uint64_t *count)
+{
+	unsigned char sb[1024];
+	char path[64], line[64], dev[80] = "";
+	uint32_t lo, hi = 0, incompat;
+	FILE *f;
+	int fd, ok;
+
+	snprintf(path, sizeof(path), "/sys/dev/block/%u:%u/uevent", maj, min);
+	f = fopen(path, "r");
+	if (!f)
+		return -1;
+	while (fgets(line, sizeof(line), f))
+		if (!strncmp(line, "DEVNAME=", 8))
+			snprintf(dev, sizeof(dev), "/dev/%.*s", (int)strcspn(line + 8, "\n"), line + 8);
+	fclose(f);
+	fd = open(dev, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	ok = pread(fd, sb, sizeof(sb), 1024) == sizeof(sb);
+	close(fd);
+	if (!ok || sb[0x38] != 0x53 || sb[0x39] != 0xEF)
+		return -1;
+	memcpy(&lo, sb + 0x04, 4);
+	memcpy(&incompat, sb + 0x60, 4);
+	if (le32toh(incompat) & 0x80)	/* 64bit */
+		memcpy(&hi, sb + 0x150, 4);
+	*count = (uint64_t)le32toh(hi) << 32 | le32toh(lo);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *mnt = argc > 1 ? argv[1] : "/";
@@ -30,7 +67,7 @@ int main(int argc, char **argv)
 	struct statvfs vfs;
 	struct stat st;
 	unsigned long long sectors;
-	uint64_t dev_bytes, blocks;
+	uint64_t dev_bytes, blocks, cur;
 	FILE *f;
 	int fd;
 
@@ -49,7 +86,11 @@ int main(int argc, char **argv)
 	dev_bytes = (uint64_t)sectors * 512;
 
 	blocks = dev_bytes / vfs.f_frsize;
-	if (blocks <= vfs.f_blocks) {
+	if (fs_blocks(major(st.st_dev), minor(st.st_dev), &cur)) {
+		fprintf(stderr, "%s: cannot read the ext4 superblock\n", mnt);
+		return 1;
+	}
+	if (blocks <= cur) {
 		printf("%s: file system already fills its partition\n", mnt);
 		return 0;
 	}
@@ -59,6 +100,6 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	printf("%s: grown from %llu to %llu blocks of %lu bytes\n", mnt,
-	       (unsigned long long)vfs.f_blocks, (unsigned long long)blocks, vfs.f_frsize);
+	       (unsigned long long)cur, (unsigned long long)blocks, vfs.f_frsize);
 	return 0;
 }

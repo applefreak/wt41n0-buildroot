@@ -25,10 +25,9 @@ from pathlib import Path
 NK_ENTRY = 0x11880          # offset of the OS entry point inside the image
 BLOB_OFFSET = 0x20000       # where the loader expects the blob
 INITRD_ADDR = 0x89000000    # where the loader copies the initramfs
-# The monitor stages the image at 0x80268000. The loader's stack (top at
-# 0x81100000) and the monitor's run copy (0x81168000) lie above it, so the
-# whole image must end below the stack.
-MAX_IMAGE_SIZE = 0x81100000 - 0x10000 - 0x80268000      # 15.2 MB
+# The monitor reads this much of the OS area to 0x80268000 at every boot,
+# whatever the image size; the loader's stack and copy destinations lie above.
+MAX_IMAGE_SIZE = 0x77F8000      # 125.8 MB
 
 # ---- Symbol HEX records ------------------------------------------------------
 # ":CCAAAATT<data>SS". Types below 0x80 carry hex text (Intel-HEX style), types
@@ -239,9 +238,8 @@ def main():
     total = BLOB_OFFSET + len(blob)
     if total > MAX_IMAGE_SIZE:
         sys.exit(f'mkhex: image is {total / 1e6:.1f} MB (zImage {len(zimage) / 1e6:.1f}, initramfs '
-                 f'{len(initrd) / 1e6:.1f}); the limit is {MAX_IMAGE_SIZE / 1e6:.1f} MB because the '
-                 'loader stack and the monitor\'s run copy sit above the staged image. '
-                 'Remove packages or kernel options to shrink it.')
+                 f'{len(initrd) / 1e6:.1f}); the limit is {MAX_IMAGE_SIZE / 1e6:.1f} MB, the part '
+                 'of the OS area the monitor loads.')
     entry = loader + bytes(BLOB_OFFSET - NK_ENTRY - len(loader)) + blob
     image = image_prefix() + entry
     output = build_hex(image)

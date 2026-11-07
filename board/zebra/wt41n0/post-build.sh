@@ -15,6 +15,9 @@ cfg_str() {	# string option, with $(BR2_EXTERNAL_WT41N0_PATH) expanded
 if cfg_bool BR2_WT41N0_BOOT_QUIET; then verbosity=quiet; else verbosity=verbose; fi
 sed -i "s/^BOOT_VERBOSITY=.*/BOOT_VERBOSITY=$verbosity/" "$TARGET/etc/default/wt41n0"
 
+# /boot on the eMMC root holds the recovery flag (see emmc-init)
+mkdir -p "$TARGET/boot"
+
 # Console keymap for the keypad, generated from the one table in support/keymap.py
 python3 "$EXT/support/keymap.py" --bmap > "$TARGET/etc/wt41n0.bmap"
 

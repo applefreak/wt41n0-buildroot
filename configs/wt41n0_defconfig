@@ -50,6 +50,8 @@ BR2_PACKAGE_WPA_SUPPLICANT=y
 BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
 BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
 BR2_PACKAGE_DROPBEAR=y
+# mke2fs for the installer image (wt41n0-install-root --self); BusyBox's makes only ext2
+BR2_PACKAGE_E2FSPROGS=y
 
 # Bluetooth: bluetoothd and bluetoothctl (the classic hciconfig / hcitool /
 # hcidump set, BR2_PACKAGE_BLUEZ5_UTILS_TOOLS, does not fit the image budget)

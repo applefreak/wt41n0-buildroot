@@ -93,11 +93,29 @@ python3 "$EXT/support/mkhex.py" \
 	--blob-out "$IMAGES/wt41n0-emmc.blob.bin" \
 	-o "$IMAGES/wt41n0-emmc.hex"
 
+# The installer image: the eMMC system's boot image with "wt41n0.install" on the
+# command line. Flashed in download mode, it installs the system on the eMMC at its
+# first boot when no root file system is there yet (see emmc-init), then works as
+# the normal eMMC boot image.
+INSTALL_DTB=$IMAGES/omap4-wt41n0-install.dtb
+cp "$EMMC_DTB" "$INSTALL_DTB"
+"$FDTPUT" -t s "$INSTALL_DTB" /chosen bootargs \
+	"$("$FDTGET" -t s "$EMMC_DTB" /chosen bootargs) wt41n0.install"
+python3 "$EXT/support/mkhex.py" \
+	--loader "$IMAGES/wt41n0-loader.bin" \
+	--zimage "$IMAGES/zImage" \
+	--dtb "$INSTALL_DTB" \
+	--initramfs "$EMMC_CPIO" \
+	--entry-out "$IMAGES/wt41n0-install.entry.bin" \
+	--blob-out "$IMAGES/wt41n0-install.blob.bin" \
+	-o "$IMAGES/wt41n0-install.hex"
+
 # Optional: run the loader in an emulator when the "unicorn" module is around.
 if python3 -c 'import unicorn' 2>/dev/null; then
-	for img in wt41n0-linux wt41n0-emmc; do
+	for img in wt41n0-linux wt41n0-emmc wt41n0-install; do
 		python3 "$EXT/support/emulate_loader.py" "$IMAGES/$img.entry.bin" "$IMAGES/$img.blob.bin" | tail -1
 	done
 fi
 echo "WT41N0: flash with  support/flash.py $IMAGES/wt41n0-linux.hex"
-echo "WT41N0: install on the eMMC with  support/install.py $IMAGES --host root@<address>"
+echo "WT41N0: install on the eMMC with  support/flash.py $IMAGES/wt41n0-install.hex"
+echo "WT41N0:   or over ssh with  support/install.py $IMAGES --host root@<address>"

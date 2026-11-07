@@ -6,6 +6,10 @@
 #   - /boot/recovery-once on the eMMC root (removed when used; support/install.py
 #     uses it to reinstall the root file system),
 #   - the eMMC root missing or not mountable.
+# The installer image (wt41n0-install.hex) is the same image with "wt41n0.install"
+# on the command line: when the root partition holds no ext2/3/4 file system yet,
+# it first installs this system there (wt41n0-install-root --self), then boots it.
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
@@ -30,7 +34,14 @@ if [ -z "$reason" ]; then
 	i=0
 	while [ ! -b /dev/mmcblk1p1 ] && [ $i -lt 50 ]; do usleep 100000; i=$((i + 1)); done
 	mkdir -p /newroot
-	if [ ! -b /dev/mmcblk1p1 ]; then
+	if [ -b /dev/mmcblk1p1 ] && grep -qw wt41n0.install /proc/cmdline &&
+	   [ "$(dd if=/dev/mmcblk1p1 bs=1 skip=1080 count=2 2>/dev/null | hexdump -e '2/1 "%02x"')" != 53ef ]; then
+		echo "WT41N0: installing the system on the eMMC"
+		wt41n0-install-root --yes --self || reason="installation on the eMMC failed"
+	fi
+	if [ -n "$reason" ]; then
+		:
+	elif [ ! -b /dev/mmcblk1p1 ]; then
 		reason="no eMMC root partition"
 	elif ! mount -t ext4 -o rw /dev/mmcblk1p1 /newroot 2>/dev/null; then
 		reason="eMMC root file system not mountable"

@@ -62,8 +62,9 @@ WebUSB. Serve it locally (`cd support/flasher && python3 -m http.server 8000`, t
 and flash**. On Windows, bind the WinUSB driver to the unit (`05e0:200b`) with Zadig first.
 
 **Installing on the eMMC.** The system can also run from the eMMC, with an ext4 root
-file system that keeps every change (`support/install.py`, see `docs/customizing.md`).
-This replaces the Windows CE data partitions.
+file system that keeps every change: flash `output/images/wt41n0-install.hex` instead,
+and it installs itself at its first boot (or use `support/install.py` over ssh; see
+`docs/customizing.md`). This replaces the Windows CE data partitions.
 
 **Updating a running unit.** Once the unit runs this system and is reachable over ssh,
 a new build can be installed without download mode:

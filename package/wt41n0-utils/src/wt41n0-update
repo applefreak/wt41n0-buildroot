@@ -13,7 +13,7 @@ set -eu
 DEV=/dev/mmcblk1
 OS_START_MIB=80			# OS (OS) partition: sectors 0x28000 .. 0x64000
 OS_SIZE_MIB=120
-MAX_IMAGE=$((0x81100000 - 0x10000 - 0x80268000))	# loader stack limit (docs/boot-flow.md)
+MAX_IMAGE=$((0x77F8000))	# what the monitor loads from the OS area (docs/boot-flow.md)
 TMP=/tmp/wt41n0-update.img
 reboot=no; check=no
 case "${1:-}" in

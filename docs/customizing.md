@@ -16,16 +16,19 @@ selection, `make linux-menuconfig` the kernel, `make busybox-menuconfig` BusyBox
 ## Installing on the eMMC
 
 By default the system runs from RAM and nothing persists. It can also be installed on
-the eMMC, where it runs from an ext4 root file system and keeps every change:
+the eMMC, where it runs from an ext4 root file system and keeps every change. Two ways:
 
-```sh
-support/install.py output/images --host root@<address>
-```
-
-The unit has to run this system (from RAM or already from the eMMC) and be reachable
-over ssh. The script writes `rootfs.ext4.gz` to the eMMC from 201 MiB to the end,
-installs the eMMC boot image `wt41n0-emmc.hex` into the OS area and reboots. On the
-first boot `S05growfs` grows the 128 MiB file system to its 1687 MiB partition.
+- **In download mode:** flash `output/images/wt41n0-install.hex` like the RAM image and
+  power-cycle. At its first boot it creates the root file system on the eMMC, copies
+  itself into it and boots it; no network is needed. It installs only when the root
+  partition holds no ext2/3/4 file system yet (a unit coming from Windows CE), so
+  flashing it again never overwrites an installed system.
+- **Over ssh:** `support/install.py output/images --host root@<address>`. The unit has
+  to run this system (from RAM or already from the eMMC). The script writes
+  `rootfs.ext4.gz` to the eMMC from 201 MiB to the end, installs the eMMC boot image
+  `wt41n0-emmc.hex` into the OS area and reboots. On the first boot `S05growfs` grows
+  the 128 MiB file system to its 1687 MiB partition. This also replaces an installed
+  system.
 
 **This erases the Windows CE Application and Platform partitions.** The boot chain, the
 OS area and Application's first sector (which the bootloader checks) are not touched.

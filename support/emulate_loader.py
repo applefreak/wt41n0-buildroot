@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run the Linux loader in a unicorn ARM emulator and check the kernel handoff.
 
-The Symbol monitor stages the OS image at 0x80268000 and makes a partial run
-copy whose entry point is 0x81179880 (see docs/boot-flow.md). This script
-reproduces that layout from the entry file (loader + padding + blob), runs the
-loader until it jumps to the kernel, and checks that the zImage, DTB and
-initramfs landed at their destinations unchanged and that r0/r1/r2 are correct.
+The Symbol monitor loads the OS area to 0x80268000 and enters the image there
+(see docs/boot-flow.md). This script reproduces that layout from the entry file
+(loader + padding + blob), runs the loader until it jumps to the kernel, and
+checks that the zImage, DTB and initramfs landed at their destinations unchanged
+and that r0/r1/r2 are correct.
 
 Optional check for people who change the loader. Needs the "unicorn" Python
 module. The two input files come from mkhex.py --entry-out / --blob-out.
@@ -31,9 +31,7 @@ RAM_BASE = 0x80000000
 RAM_SIZE = 0x20000000
 STAGING_BASE = 0x80268000
 ENTRY_OFFSET = 0x11880            # OS entry point inside the image
-LOADER_ADDR = 0x81179880          # monitor jumps here (run copy)
-RUN_COPY_INTACT = 0x780           # only this much of the run copy is trusted
-STAGING_LOADER = STAGING_BASE + ENTRY_OFFSET
+STAGING_LOADER = STAGING_BASE + ENTRY_OFFSET   # the monitor enters the image here
 PL310_BASE = 0x48242000
 BLOB_FILE_OFFSET = 0x20000
 BLOB_ADDR = STAGING_BASE + BLOB_FILE_OFFSET
@@ -62,16 +60,11 @@ def main():
     initrd = blob[12 + zlen + dlen:12 + zlen + dlen + ilen]
     if len(initrd) != ilen:
         sys.exit('blob shorter than header lengths')
-    loader = entry[:blob_offset].rstrip(b'\0')
 
     mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     mu.mem_map(RAM_BASE, RAM_SIZE)
     # Staged image (the part in front of the entry point does not matter here).
     mu.mem_write(STAGING_BASE + ENTRY_OFFSET, entry)
-    # Run copy made by the monitor: only the first 0x780 bytes are reliable,
-    # so model exactly that and fill the rest with junk.
-    mu.mem_write(LOADER_ADDR, loader[:RUN_COPY_INTACT])
-    mu.mem_write(LOADER_ADDR + RUN_COPY_INTACT, b'\xA5' * (len(loader) - RUN_COPY_INTACT))
     # PL310 L2 controller, modelled as enabled so the disable path runs.
     mu.mem_map(PL310_BASE, 0x1000)
     mu.mem_write(PL310_BASE + 0x100, struct.pack('<I', 1))
@@ -134,7 +127,7 @@ def main():
     mu.hook_add(UC_HOOK_INTR, on_intr)
 
     try:
-        mu.emu_start(LOADER_ADDR, 0, count=0)
+        mu.emu_start(STAGING_LOADER, 0, count=0)
     except Exception as exc:  # unicorn raises UcError on faults
         if not state['fault']:
             state['fault'] = f'{exc} at pc=0x{mu.reg_read(UC_ARM_REG_PC):08X}'

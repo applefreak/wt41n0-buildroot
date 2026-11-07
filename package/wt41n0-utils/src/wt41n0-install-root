@@ -1,14 +1,20 @@
 #!/bin/sh
-# wt41n0-install-root: write the root filesystem image to the eMMC root partition
+# wt41n0-install-root: install the root filesystem on the eMMC root partition
 # (201 MiB to the end, over the Windows CE Application/Platform/Scratchpad areas).
-# Run it from the RAM system. Normally driven by support/install.py on the host.
+# Run it from the RAM system.
 #
 #   wt41n0-install-root --yes < stream
+#       Write a root filesystem image. The stream is one header line
+#       "WT41N0ROOT <bytes> <sha256>" (size and checksum of the uncompressed image)
+#       followed by the gzip-compressed image. Normally driven by support/install.py
+#       on the host.
+#   wt41n0-install-root --yes --self
+#       Create an ext4 file system on the partition and copy the running RAM system
+#       into it. Refuses if the partition already holds an ext2/3/4 file system.
+#       Used by the installer image (wt41n0-install.hex) at boot.
 #
-# The stream is one header line "WT41N0ROOT <bytes> <sha256>" (size and checksum of
-# the uncompressed image) followed by the gzip-compressed image. Nothing below
-# 201 MiB is written: the boot chain, the OS area and Application's first sector
-# (which the bootloader checks) stay as they are.
+# Nothing below 201 MiB is written: the boot chain, the OS area and Application's
+# first sector (which the bootloader checks) stay as they are.
 set -eu
 DEV=/dev/mmcblk1
 START_MIB=201
@@ -17,6 +23,7 @@ die() { echo "wt41n0-install-root: $*" >&2; exit 1; }
 u32() { hexdump -s "$2" -n 4 -e '1/4 "%u"' "$1"; }
 
 [ "${1:-}" = --yes ] || die "this erases the Windows CE data partitions; pass --yes"
+mode=${2:-stream}
 grep -q '^/dev/mmcblk1p1 / ' /proc/mounts && die "run this from the RAM or recovery system, not from the eMMC system"
 grep -q '^/dev/mmcblk1p' /proc/mounts && die "an eMMC partition is mounted"
 
@@ -32,6 +39,37 @@ dd if=$DEV of=$tab bs=4096 skip=768 count=1 2>/dev/null
 rm -f $tab
 [ "$(dd if=$DEV bs=1 skip=$((200 * 1048576 + 510)) count=2 2>/dev/null | hexdump -e '2/1 "%02x"')" = 55aa ] ||
 	die "the Application boot sector at 200 MiB is not intact"
+
+if [ "$mode" = --self ]; then
+	PART=${DEV}p1	# defined by blkdevparts= on the kernel command line
+	[ -b $PART ] || die "no $PART (blkdevparts missing from the command line?)"
+	[ "$(cat /sys/class/block/mmcblk1p1/start)" = $((START_MIB * 2048)) ] ||
+		die "$PART does not start at $START_MIB MiB"
+	[ "$(dd if=$PART bs=1 skip=1080 count=2 2>/dev/null | hexdump -e '2/1 "%02x"')" != 53ef ] ||
+		die "$PART already holds an ext2/3/4 file system; not overwriting it"
+
+	# the same file system as Buildroot's rootfs.ext4 (configs/wt41n0_defconfig)
+	echo "wt41n0-install-root: creating the file system"
+	mke2fs -q -F -t ext4 -L wt41n0-root -O ^64bit -b 4096 -m 1 $PART
+	mnt=/tmp/install-root.mnt
+	mkdir -p $mnt
+	mount -t ext4 $PART $mnt
+	echo "wt41n0-install-root: copying the system"
+	# everything but the virtual file systems, /tmp and the installer's own /init
+	for e in /* /.[!.]*; do
+		case $e in
+		/dev | /proc | /sys | /tmp | /newroot | /init | '/.[!.]*') ;;
+		*) cp -a "$e" $mnt/ ;;
+		esac
+	done
+	mkdir -p $mnt/dev $mnt/proc $mnt/sys $mnt/tmp $mnt/boot
+	chmod 1777 $mnt/tmp
+	umount $mnt
+	sync
+	echo "wt41n0-install-root: root filesystem installed"
+	exit 0
+fi
+[ "$mode" = stream ] || die "unknown option $mode"
 
 read -r magic size sha
 [ "$magic" = WT41N0ROOT ] || die "bad stream header"
