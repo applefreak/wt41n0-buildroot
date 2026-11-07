@@ -4,10 +4,13 @@
 # Usage: wt41n0-fpga                print the S, X and Y block registers
 #        wt41n0-fpga pen            print the touch pen level (S+0x14 bit 5) for 10 s
 #        wt41n0-fpga power on|off   switch the accessory port (ring scanner) power
+#        wt41n0-fpga serial on|off  power the accessory port and connect its serial
+#                                   lines to UART2 (/dev/ttyS1), for other accessories
 #
 # The kernel driver (wt41n0-fpga) owns the chip select and interrupts and exposes the
 # outputs as the GPIO lines of the "wt41n0-fpga" chip: 0 accessory-power,
-# 1 accessory-scan, 2 keypad-ctrl-led, 3 keypad-func-led, 4 audio-amplifier.
+# 1 accessory-scan, 2 keypad-ctrl-led, 3 keypad-func-led, 4 audio-amplifier,
+# 5 accessory-serial. wt41n0-scan switches lines 0 and 5 for the ring scanner.
 S=0x02020000; X=0x02080000; Y=0x020C0000
 
 dump() {	# dump <name> <base> <offsets...>
@@ -15,6 +18,14 @@ dump() {	# dump <name> <base> <offsets...>
 	printf '%s block (%s):' "$name" "$base"
 	for off in "$@"; do printf ' +%s=%s' "$off" "$(devmem $((base + off)) 16)"; done
 	echo
+}
+
+line() {	# line <name> <line number> [value]: export an FPGA output, set it
+	chip=$(grep -l '^wt41n0-fpga$' /sys/class/gpio/gpiochip*/label 2>/dev/null | head -1)
+	[ -n "$chip" ] || { echo "no wt41n0-fpga GPIO chip" >&2; exit 1; }
+	dir=/sys/class/gpio/$1	# sysfs names exported lines by their name
+	[ -d $dir ] || echo $(( $(cat "${chip%/label}/base") + $2 )) > /sys/class/gpio/export
+	[ -z "${3:-}" ] || echo $3 > $dir/value
 }
 
 case "${1:-}" in
@@ -30,20 +41,20 @@ pen)
 		usleep 500000; i=$((i + 1))
 	done
 	;;
-power)
-	chip=$(grep -l '^wt41n0-fpga$' /sys/class/gpio/gpiochip*/label 2>/dev/null | head -1)
-	[ -n "$chip" ] || { echo "no wt41n0-fpga GPIO chip" >&2; exit 1; }
-	gpio=$(cat "${chip%/label}/base")	# line 0: accessory-power
-	dir=/sys/class/gpio/accessory-power	# sysfs names exported lines by their name
-	[ -d $dir ] || echo $gpio > /sys/class/gpio/export
+power | serial)
 	case "${2:-}" in
-	on) echo 1 > $dir/value ;;
-	off) echo 0 > $dir/value ;;
-	"") ;;
-	*) echo "usage: $0 power [on|off]" >&2; exit 1 ;;
+	on) v=1 ;;
+	off) v=0 ;;
+	"") v= ;;
+	*) echo "usage: $0 $1 [on|off]" >&2; exit 1 ;;
 	esac
-	echo "accessory power: $(cat $dir/value)"
+	line accessory-power 0 $v
+	echo "accessory power: $(cat /sys/class/gpio/accessory-power/value)"
+	if [ "$1" = serial ]; then
+		line accessory-serial 5 $v
+		echo "accessory serial: $(cat /sys/class/gpio/accessory-serial/value)"
+	fi
 	;;
 *)
-	echo "usage: $0 [pen | power [on|off]]" >&2; exit 1 ;;
+	echo "usage: $0 [pen | power [on|off] | serial [on|off]]" >&2; exit 1 ;;
 esac

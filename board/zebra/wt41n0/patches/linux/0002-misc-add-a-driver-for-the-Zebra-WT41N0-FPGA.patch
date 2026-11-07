@@ -15,8 +15,8 @@ Upstream: not submitted
 ---
  drivers/misc/Kconfig       |   9 +
  drivers/misc/Makefile      |   1 +
- drivers/misc/wt41n0-fpga.c | 334 +++++++++++++++++++++++++++++++++++++
- 3 files changed, 344 insertions(+)
+ drivers/misc/wt41n0-fpga.c | 336 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 346 insertions(+)
  create mode 100644 drivers/misc/wt41n0-fpga.c
 
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
@@ -48,10 +48,10 @@ index a9f94525e..bfc38fe03 100644
 +obj-$(CONFIG_WT41N0_FPGA)	+= wt41n0-fpga.o
 diff --git a/drivers/misc/wt41n0-fpga.c b/drivers/misc/wt41n0-fpga.c
 new file mode 100644
-index 000000000..f4d584d92
+index 000000000..7361d1203
 --- /dev/null
 +++ b/drivers/misc/wt41n0-fpga.c
-@@ -0,0 +1,334 @@
+@@ -0,0 +1,336 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Zebra/Symbol WT41N0 Actel FPGA on the OMAP4 GPMC.
@@ -70,7 +70,8 @@ index 000000000..f4d584d92
 + *
 + * This driver provides an irq_chip/domain for the 24 sources (used by the SX8650
 + * touch controller, source 0) and the FPGA's outputs as GPIO lines. Line 0 switches
-+ * the accessory ports' power (the ring scanner's UART); it starts off.
++ * the accessory ports' power and line 5 connects their serial lines to UART2 (the
++ * ring scanner needs both); all outputs start off.
 + */
 +#include <linux/bitops.h>
 +#include <linux/gpio/driver.h>
@@ -94,7 +95,7 @@ index 000000000..f4d584d92
 +#define GLOBAL_WAKE_EN	0x40
 +
 +#define S_KBD_SET	(FPGA_S + 0x18)		/* bit2 CTRL, bit0 FUNC keypad LED outputs */
-+#define S_ACC_SET	(FPGA_S + 0x28)		/* bit1 accessory power, bit2 accessory "scan" */
++#define S_ACC_SET	(FPGA_S + 0x28)		/* bit0 accessory serial, bit1 power, bit2 "scan" */
 +#define S_AUDIO_SET	(FPGA_S + 0x98)		/* bit3 audio amplifier */
 +
 +#define WT41N0_FPGA_NR_IRQS	24
@@ -163,11 +164,12 @@ index 000000000..f4d584d92
 +	{ "keypad-ctrl-led",	S_KBD_SET, BIT(2) },
 +	{ "keypad-func-led",	S_KBD_SET, BIT(0) },
 +	{ "audio-amplifier",	S_AUDIO_SET, BIT(3) },
++	{ "accessory-serial",	S_ACC_SET, BIT(0) },
 +};
 +
 +static const char * const fpga_output_names[] = {
 +	"accessory-power", "accessory-scan", "keypad-ctrl-led", "keypad-func-led",
-+	"audio-amplifier",
++	"audio-amplifier", "accessory-serial",
 +};
 +
 +static void fpga_gpio_set(struct gpio_chip *gc, unsigned int off, int value)

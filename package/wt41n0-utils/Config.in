@@ -10,4 +10,5 @@ config BR2_PACKAGE_WT41N0_UTILS
 	    wt41n0-update   install a new image into the eMMC OS area
 	    wt41n0-install-root  write the root filesystem to the eMMC
 	    wt41n0-growfs   grow the eMMC root file system to its partition
+	    wt41n0-scan     read barcodes from the ring scanner
 	    keys            show the keypad layers

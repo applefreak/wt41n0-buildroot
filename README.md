@@ -4,9 +4,9 @@ A [Buildroot](https://buildroot.org) external tree (`BR2_EXTERNAL`) that builds 
 complete, small Linux system for the WT41N0 wearable terminal (TI OMAP4430) and
 packages it as an image the unit's own bootloader accepts over USB.
 
-The system runs from RAM. It replaces the Windows CE image in the unit's OS area and
-leaves the bootloader and the other storage areas alone, so flashing the stock OS
-image again restores the unit. The image is built entirely from this tree: no Zebra
+The system runs from RAM, or from an ext4 root file system on the eMMC once installed
+there. It replaces the Windows CE image in the unit's OS area and leaves the bootloader
+alone, so flashing the stock OS image again restores the unit. The image is built entirely from this tree: no Zebra
 file is needed to build it.
 
 ## What works
@@ -21,10 +21,11 @@ file is needed to build it.
 | Bluetooth | classic Bluetooth (BR/EDR): scan, discoverable, pairing with `bluetoothctl`; no Low Energy. Needs the chip's init script from your unit's Windows CE image (see `local/README.md`) |
 | USB | serial console over the USB / cradle cable (full speed) |
 | Audio | built-in speaker through ALSA (`aplay file.wav`); built-in microphone records, but at the wrong rate for now |
-| Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC (read access) |
+| Battery, charging | battery voltage, capacity, current and temperature in `/sys/class/power_supply`; charges in the cradle, with the middle LED blinking orange |
+| Ring scanner | barcodes from the ring scanner with its trigger (`wt41n0-scan`); the accessory ports also work as a plain serial port (`wt41n0-fpga serial on`, `/dev/ttyS1`) |
+| Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC root file system that keeps every change (`support/install.py`) |
 
-Not working yet: Bluetooth Low Energy, headset audio, battery and charger reporting, the
-hardware beeper, the ring-scanner port, suspend.
+Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, suspend.
 
 ## What you need
 

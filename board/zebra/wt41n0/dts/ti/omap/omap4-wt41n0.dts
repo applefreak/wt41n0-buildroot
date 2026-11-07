@@ -423,7 +423,7 @@
 		interrupt-controller;
 		#interrupt-cells = <2>;
 		/* outputs: 0 accessory power, 1 accessory "scan", 2/3 keypad
-		 * CTRL/FUNC LED outputs, 4 audio amplifier */
+		 * CTRL/FUNC LED outputs, 4 audio amplifier, 5 accessory serial */
 		gpio-controller;
 		#gpio-cells = <2>;
 

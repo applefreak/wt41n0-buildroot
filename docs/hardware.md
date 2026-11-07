@@ -24,7 +24,7 @@ GPIO numbers (bank = number / 32 + 1, line = number % 32).
 | Accelerometer | NXP/Freescale MMA8452Q on I2C2 0x1C | `mma8452` | working |
 | USB | MUSB OTG, device mode | `musb-hdrc`, `g_serial` | working at full speed only |
 | Power button | TWL6030 PWRON | `twl6030-pwrbutton` | working (key events) |
-| Scanner port | UART2 | - | not supported yet |
+| Ring scanner | Zebra SSI on UART2, trigger on GPIO 2 | `wt41n0-scan` (user space) | working |
 
 ## Boot state
 
@@ -184,9 +184,12 @@ The pen level can also be read directly at S+`0x14` bit 5.
 | keypad CTRL LED output | S+0x18 / 0x1A | 2 | `keypad-ctrl-led` |
 | keypad FUNC LED output | S+0x18 / 0x1A | 0 | `keypad-func-led` |
 | audio amplifier enable | S+0x98 / 0x9A | 3 | `audio-amplifier` |
+| accessory serial lines to UART2 | S+0x28 / 0x2A | 0 | `accessory-serial` |
 
 The stock OS powers the scanner port with S+0x28 bit 1 (`Uart2\DevPower`, active high,
-initially off); toggling it power-cycles an attached ring scanner. The keypad LED outputs
+initially off); toggling it power-cycles an attached ring scanner. Bit 0 connects the
+ports' serial lines to UART2: without it UART2's RX and CTS pins float. Only bits 0 to 2
+of S+0x28 are writable; bit 4 reads as set. The keypad LED outputs
 light nothing on the unit itself. The built-in speaker plays without the amplifier bit.
 
 Beeper registers: S+`0x94` frequency divider (bits 5:0) and duration (bits 7:6),
@@ -257,8 +260,26 @@ line is not known; values are read through IIO.
 
 ## Scanner and accessory ports
 
-The two accessory ports carry a serial scan engine interface on UART2 (`0x4806C000`), 38400
-baud in the stock OS, powered through the FPGA. Not supported under Linux yet.
+The two accessory ports (left and right) are equivalent and carry the ring scanner (tested
+with an RS419, firmware `PAACBS00-002-R01`):
+
+- Power: FPGA output `accessory-power`; serial lines: FPGA output `accessory-serial`.
+  Both are needed.
+- Serial: UART2 (`0x4806C000`, `/dev/ttyS1`), 38400 baud 8N1, no flow control, Zebra SSI
+  protocol. **RTS must be deasserted**; the scanner does not answer while it is asserted
+  (the stock OS opens the port with RTS control disabled).
+- Trigger: wired to the terminal, OMAP GPIO 2 (bank 1, line 2), active low. The scanner
+  does not scan on its own: the host sends `START_DECODE` on press and `STOP_DECODE` on
+  release, so one trigger starts every attached scanner.
+- Decode data arrives as raw text unless parameter `0xEE` (decode data packet format) is
+  set to 1, after which each barcode comes as an SSI `DECODE_DATA` packet (barcode type,
+  then the data) that the host acknowledges. The scanner as delivered also prefixes a
+  code ID character (`A` for UPC-A); parameter `0x2D` = 0 turns that off.
+- The trigger contact bounces; read the settled level after an edge.
+
+`wt41n0-scan` implements this and prints one barcode per line. For other accessories,
+`wt41n0-fpga serial on` switches on both outputs and leaves `/dev/ttyS1` to any program;
+the connector's pinout and signal levels have not been measured yet.
 
 ## Not yet identified
 

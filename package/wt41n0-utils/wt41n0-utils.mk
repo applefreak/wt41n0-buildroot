@@ -12,6 +12,7 @@ WT41N0_UTILS_LICENSE = GPL-2.0
 define WT41N0_UTILS_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -o $(@D)/pcmtest $(@D)/pcmtest.c -lm
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -o $(@D)/wt41n0-growfs $(@D)/wt41n0-growfs.c
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -o $(@D)/wt41n0-scan $(@D)/wt41n0-scan.c
 endef
 
 define WT41N0_UTILS_INSTALL_TARGET_CMDS
@@ -21,6 +22,7 @@ define WT41N0_UTILS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-update $(TARGET_DIR)/usr/sbin/wt41n0-update
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-install-root $(TARGET_DIR)/usr/sbin/wt41n0-install-root
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-growfs $(TARGET_DIR)/usr/sbin/wt41n0-growfs
+	$(INSTALL) -D -m 0755 $(@D)/wt41n0-scan $(TARGET_DIR)/usr/bin/wt41n0-scan
 	$(INSTALL) -D -m 0755 $(@D)/keys $(TARGET_DIR)/usr/bin/keys
 endef
 
