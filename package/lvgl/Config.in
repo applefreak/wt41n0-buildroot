@@ -1,0 +1,10 @@
+config BR2_PACKAGE_LVGL
+	bool "lvgl"
+	depends on BR2_INSTALL_LIBSTDCPP # its CMake project needs C++
+	help
+	  LVGL, the Light and Versatile Graphics Library: widgets,
+	  styles, fonts and input handling for small displays, built
+	  as a shared library with the configuration in lv_conf.h
+	  next to this file. Used by wt41n0-ui.
+
+	  https://lvgl.io

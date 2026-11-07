@@ -59,7 +59,19 @@ config BR2_WT41N0_BOOT_DEBUG
 
 endchoice
 
+config BR2_WT41N0_LAUNCHER
+	bool "start the launcher on the LCD"
+	default y
+	depends on BR2_PACKAGE_WT41N0_UI
+	help
+	  Start the wt41n0-ui launcher (the home screen) on the LCD
+	  instead of a root shell. The shell stays available as the
+	  Terminal app (on tty2; hold ESC to come back), over ssh and
+	  on the USB console.
+
 endmenu
 
 source "$BR2_EXTERNAL_WT41N0_PATH/package/wt41n0-loader/Config.in"
 source "$BR2_EXTERNAL_WT41N0_PATH/package/wt41n0-utils/Config.in"
+source "$BR2_EXTERNAL_WT41N0_PATH/package/lvgl/Config.in"
+source "$BR2_EXTERNAL_WT41N0_PATH/package/wt41n0-ui/Config.in"

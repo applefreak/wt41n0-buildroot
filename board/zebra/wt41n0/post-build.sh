@@ -18,6 +18,14 @@ sed -i "s/^BOOT_VERBOSITY=.*/BOOT_VERBOSITY=$verbosity/" "$TARGET/etc/default/wt
 # /boot on the eMMC root holds the recovery flag (see emmc-init)
 mkdir -p "$TARGET/boot"
 
+# The launcher instead of the shell on the LCD (tty1). The overlay brings a fresh
+# inittab at every build, so turning the option off restores the shell.
+if cfg_bool BR2_WT41N0_LAUNCHER; then
+	sed -i 's|^tty1::respawn:-/bin/sh$|tty1::respawn:/usr/bin/wt41n0-launcher|' "$TARGET/etc/inittab"
+	grep -q '^tty1::respawn:/usr/bin/wt41n0-launcher$' "$TARGET/etc/inittab" ||
+		{ echo "post-build: could not put the launcher in inittab" >&2; exit 1; }
+fi
+
 # Console keymap for the keypad, generated from the one table in support/keymap.py
 python3 "$EXT/support/keymap.py" --bmap > "$TARGET/etc/wt41n0.bmap"
 

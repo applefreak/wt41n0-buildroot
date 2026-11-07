@@ -1,0 +1,22 @@
+config BR2_PACKAGE_WT41N0_UI
+	bool "wt41n0-ui"
+	depends on BR2_INSTALL_LIBSTDCPP # lvgl
+	select BR2_PACKAGE_LVGL
+	help
+	  The WT41N0 launcher and its apps, on LVGL: a home screen
+	  driven by the keypad or the touch panel, and the shared
+	  library libwt41n0ui the apps build on (display, input,
+	  theme, status bar).
+
+if BR2_PACKAGE_WT41N0_UI
+
+config BR2_PACKAGE_WT41N0_UI_EXAMPLE
+	bool "example app"
+	help
+	  Install the example app (src/apps/example), the template
+	  for writing new apps, with its home screen tile.
+
+endif
+
+comment "wt41n0-ui needs a toolchain with C++ (for LVGL's build)"
+	depends on !BR2_INSTALL_LIBSTDCPP
