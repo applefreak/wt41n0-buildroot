@@ -72,6 +72,32 @@ interrupt, 100 Wi-Fi enable, 103 Bluetooth enable, 104 audio codec power (`audpw
   unidentified. Nothing answers at 0x6A, where the stock OS configuration lists a BQ24156
   charger.
 
+### CPU speed and voltage
+
+The bootloader leaves the MPU at 600 MHz (DPLL_MPU). Windows CE scaled it by load over
+300 / 600 / 800 / 1000 MHz (registry `OMAPPMX\Policies\CPULOAD`, `MpuOppFrequency`) with
+SmartReflex on.
+
+Mainline Linux never sets VDD_MPU on OMAP4 (no `cpu0-supply`; the MPU voltage processor
+stays disabled), so this BSP does what the PandaBoard's U-Boot does: `S01cpufreq` sets
+VDD_MPU to 1.325 V once, and cpufreq-dt then changes only the clock, over 300 / 600 /
+800 MHz. The kernel boots with the userspace governor, which holds 600 MHz until the
+script has written the voltage. 1008 MHz (OPP-Nitro) also needs 1.375 V and the ABB in
+forward body bias, and is left out. Checked: 10 minutes of two-core checksums at
+800 MHz without an error, the CPU at 77 °C at most.
+
+- Voltage write: OMAP voltage controller bypass (`PRM_VC_VAL_BYPASS`, 0x4A307BA0), PMIC
+  slave 0x12 (TWL6030 SmartReflex I2C), register 0x55 (VCORE1 = VDD_MPU; 0x5B VCORE2 =
+  IVA, 0x61 VCORE3 = core), then the VALID bit (24), which clears when it has been sent.
+  The VCORE voltage registers read back 0 over I2C1.
+- TWL6030 SMPS_OFFSET (0x48 register 0xE0) reads 0x7F: bit 3 is set, so the SMPS steps
+  are 12.66 mV from 0.709 V (vsel 0x32 = 1.329 V). The last bypass write the bootloader
+  left is core 0x2A = 1.228 V.
+- Kernel bug to keep in mind: `omap_twl.c` reads SMPS_OFFSET before the TWL driver is up
+  ("twl: not initialized"), falls back to "no offset" and so maps every voltage 0.1 V
+  low. Nothing uses that mapping today (SmartReflex autocomp is off, the voltage
+  processors are disabled); enabling either would set voltages 0.1 V higher than meant.
+
 ## Storage
 
 eMMC on MMC2, `/dev/mmcblk1` under Linux: a 1888 MiB user area plus two 2 MiB boot

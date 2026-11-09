@@ -1,0 +1,40 @@
+#!/bin/sh
+# CPU speed: 300-800 MHz by load, as the PandaBoard runs mainline Linux.
+#
+# The kernel boots with the userspace governor, so the CPU stays at the
+# bootloader's 600 MHz. Linux never sets VDD_MPU on OMAP4, so set it here the way
+# the PandaBoard's U-Boot does: 1.325 V on TWL6030 VCORE1, through the OMAP
+# voltage controller's bypass channel (the SmartReflex I2C, PMIC slave 0x12,
+# register 0x55). Only once the controller has taken it does ondemand start; if
+# anything fails the CPU stays at 600 MHz.
+POLICY=/sys/devices/system/cpu/cpu0/cpufreq
+BYPASS=0x4A307BA0	# PRM_VC_VAL_BYPASS: data[23:16] reg[15:8] slave[6:0], VALID bit 24
+
+case "$1" in
+start)
+	printf 'CPU speed: '
+	[ -d $POLICY ] || { echo "no cpufreq, fixed speed"; exit 0; }
+	# TWL6030 SMPS step 12.66 mV from 0.709 V when its SMPS_OFFSET fuse (0x48
+	# register 0xE0, bit 3) is set, from 0.6077 V when not: vsel for 1.325 V
+	off=$(i2cget -f -y 0 0x48 0xE0 2>/dev/null) || { echo "PMIC not readable, staying at 600 MHz"; exit 1; }
+	if [ $(( off & 0x08 )) -ne 0 ]; then vsel=0x32; else vsel=0x3A; fi
+	cmd=$(( (vsel << 16) | (0x55 << 8) | 0x12 ))
+	devmem $BYPASS 32 $cmd
+	devmem $BYPASS 32 $(( cmd | 0x01000000 ))
+	i=0
+	while [ $(( $(devmem $BYPASS 32) & 0x01000000 )) -ne 0 ]; do
+		i=$((i + 1))
+		[ $i -lt 200 ] || { echo "voltage not taken, staying at 600 MHz"; exit 1; }
+	done
+	echo ondemand > $POLICY/scaling_governor || { echo "no ondemand governor"; exit 1; }
+	# React to a key press: the UI's work comes in 30-50 ms bursts, shorter than the
+	# default 95 % threshold notices. Go up above 30 % load and stay up for 20
+	# samples (400 ms). The voltage is the same at every speed, so holding 800 MHz
+	# a little longer costs little.
+	echo 30 > /sys/devices/system/cpu/cpufreq/ondemand/up_threshold
+	echo 20 > /sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor
+	echo "300-800 MHz (ondemand, VDD_MPU 1.325 V)"
+	;;
+stop) ;;
+*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

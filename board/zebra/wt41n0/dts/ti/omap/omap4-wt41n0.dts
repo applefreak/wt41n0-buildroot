@@ -62,8 +62,11 @@
 		 *    240x320 buffer rotated by 90 degrees.
 		 *  - clk_ignore_unused / pd_ignore_unused: the display runs on
 		 *    clocks and domains the bootloader enabled; never gate them.
+		 *  - cpufreq.default_governor=userspace: the CPU stays at the
+		 *    bootloader's 600 MHz until S01cpufreq has set the voltage the
+		 *    faster speeds need (see &cpu0 below).
 		 */
-		bootargs = "cpuidle.off=1 console=tty1 fbcon=font:VGA8x8,rotate:3 clk_ignore_unused pd_ignore_unused";
+		bootargs = "cpuidle.off=1 console=tty1 fbcon=font:VGA8x8,rotate:3 clk_ignore_unused pd_ignore_unused cpufreq.default_governor=userspace";
 		linux,initrd-start = <0x89000000>;
 		linux,initrd-end = <0x89000000>;	/* set by post-image */
 
@@ -157,6 +160,24 @@
 };
 
 /* ---- PMIC and audio codec on I2C1 ------------------------------------------ */
+
+/*
+ * CPU speeds. Nothing in Linux scales VDD_MPU on OMAP4 (no cpu0-supply), so this
+ * board does what the PandaBoard's U-Boot does: VDD_MPU is set once to 1.325 V,
+ * enough for OPP-Turbo (800 MHz), and cpufreq only changes the clock. S01cpufreq
+ * writes that voltage, then starts the ondemand governor. OPP-Nitro (1008 MHz)
+ * also needs 1.375 V and the ABB in forward body bias, so it is left out. The
+ * voltages below are TI's nominal ones; with no supply cpufreq-dt ignores them.
+ */
+&cpu0 {
+	/delete-property/ operating-points;
+	operating-points = <
+		/* kHz    uV */
+		300000  1025000
+		600000  1200000
+		800000  1313000
+	>;
+};
 
 &i2c1 {
 	status = "okay";

@@ -106,3 +106,7 @@ CONFIG_CLK_TWL6040=y
 # Not on this board; they only add error lines to the boot log
 # CONFIG_MTD_OOPS is not set
 # CONFIG_CHARGER_BQ2415X is not set
+
+# CPU speed scaling, 300-800 MHz (see &cpu0 in the device tree and S01cpufreq)
+CONFIG_CPUFREQ_DT=y
+CONFIG_CPU_FREQ_STAT=y
