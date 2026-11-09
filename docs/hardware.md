@@ -290,7 +290,11 @@ TI WL1283 (WiLink 7): Wi-Fi 802.11a/b/g/n and Bluetooth in one chip.
 - **Bluetooth**: UART1, enable GPIO 103, host wake GPIO 139, 3 Mbaud after init. Needs
   `ti-connectivity/TIInit_10.6.15.bts`, the version from the unit's Windows CE image (TI
   patch `TI_P6_15.90` plus an audio-processor script); TI's public files of that name do
-  not work on this unit. The ROM advertises Low Energy, but the controller refuses LE
+  not work on this unit. Tried: `TI-ECS/bt-firmware` on GitHub (53,488 bytes) and the
+  git.ti.com `ti-bt/service-packs` `initscripts/TIInit_10.6.15.bts` (53,542 bytes,
+  revision 3aa1d75 of 2021): the chip stops answering at vendor command 0xfd1c ("tx
+  timeout", then "Reading TI version information failed (-110)" on each retry), and the
+  Wi-Fi half fails with it ("sdio write failed (-110)", "firmware boot failed"). The ROM advertises Low Energy, but the controller refuses LE
   commands, so Linux uses it as BR/EDR only (kernel patch 0009).
 - The two halves share the chip: resetting the Bluetooth core (for example by restarting
   its driver, or a failed init script) also crashes the Wi-Fi firmware.

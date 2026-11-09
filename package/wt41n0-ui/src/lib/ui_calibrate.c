@@ -6,6 +6,7 @@
  */
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include "ui_internal.h"
 
 #define NPOINTS		6
@@ -32,11 +33,21 @@ bool ui_touch_present(void)
 	return platform_has_touch();
 }
 
+/* calibrated, or skipped with ESC ("touch_cal=skipped"): either way not asked again at
+ * start. Units without a touch panel still have the controller, so the launcher would
+ * otherwise ask at every boot. */
 bool ui_touch_calibrated(void)
 {
 	char buf[256];
 
 	return conf_get("touch_cal", buf, sizeof(buf)) == 0;
+}
+
+bool ui_touch_calibration_skipped(void)
+{
+	char buf[256];
+
+	return conf_get("touch_cal", buf, sizeof(buf)) == 0 && !strcmp(buf, "skipped");
 }
 
 /* Solve the 3x3 system m * r = v by Cramer's rule; returns false if singular */
@@ -126,6 +137,9 @@ static void finish(bool saved)
 	lv_timer_delete(cal.timer);
 	cal.timer = NULL;
 	platform_touch_enable(true);
+	/* skipped with none saved yet: remember it (an existing calibration stays) */
+	if (!saved && !ui_touch_calibrated())
+		conf_set("touch_cal", "skipped");
 	if (done)
 		done(saved);
 }

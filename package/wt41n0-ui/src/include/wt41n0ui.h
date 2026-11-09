@@ -235,7 +235,8 @@ int ui_wifi_quality(void);		/* 0..100 */
 /* Touch panel. ui_touch_calibrate() shows the calibration screen (centre, four
  * corners, centre check) and calls done() when it is saved or skipped with Esc. */
 bool ui_touch_present(void);
-bool ui_touch_calibrated(void);
+bool ui_touch_calibrated(void);		/* or skipped: not asked at start */
+bool ui_touch_calibration_skipped(void);
 void ui_touch_calibrate(void (*done)(bool saved));
 
 /* Sticky key layers being active (for the status bar) */

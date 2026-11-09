@@ -510,7 +510,7 @@ void settings_menu(int focus)
 	rows[ROW_INPUT] = ui_row(list, "keyboard", "TEXT INPUT", strcmp(mode, "keyboard") ? "KEY LAYERS" : "ON-SCREEN");
 	rows[ROW_TZ] = ui_row(list, "clock", "TIME ZONE", z == ZONE_UTC ? "UTC" : z >= 0 ? zones[z].name : "CUSTOM");
 	if (ui_touch_present())
-		rows[ROW_TOUCH] = ui_row(list, "touch", "TOUCH CALIBRATION", ui_touch_calibrated() ? "DONE" : "NOT SET");
+		rows[ROW_TOUCH] = ui_row(list, "touch", "TOUCH CALIBRATION", ui_touch_calibration_skipped() ? "SKIPPED" : ui_touch_calibrated() ? "DONE" : "NOT SET");
 	for (i = 0; i <= ROW_TOUCH; i++)
 		if (rows[i])
 			lv_obj_add_event_cb(rows[i], menu_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
