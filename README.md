@@ -11,7 +11,6 @@ file is needed to build it.
 
 ## What works
 
-| | |
 |---|---|
 | Display, backlight | 320x240 LCD console, PWM brightness in `/sys/class/backlight` |
 | Keypad | all keys, with the orange / gray / blue layers on the text console (`keys` shows them); its backlight (`/sys/class/leds/keypad-backlight`) automatic, always on or off, set in Settings |
@@ -134,6 +133,14 @@ support/                          host tools: mkhex.py, flash.py, console.py, ke
 docs/                             hardware notes and how the boot works
 local/                            your private files: Wi-Fi config, ssh keys (not tracked)
 ```
+
+## Prebuilt images
+
+GitHub builds the images on every push (`.github/workflows/build.yml`): each run under
+**Actions** has them as an artifact, kept 7 days. A `v*` tag publishes them as a
+**Release**. These are the public configuration: without the Bluetooth init script
+(see `local/README.md`) Bluetooth is disabled; Wi-Fi works. For Bluetooth, build
+locally with the script in `local/firmware/`.
 
 ## Building in a container
 

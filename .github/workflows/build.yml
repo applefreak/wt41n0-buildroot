@@ -1,0 +1,89 @@
+# Build the WT41N0 images on every push and pull request; a v* tag also publishes them
+# as a GitHub Release. This is the public configuration: local/ is not in the
+# repository, so the images have no Bluetooth (post-image.sh disables it without the
+# init script), no baked-in Wi-Fi networks and no ssh keys.
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    # Same OS as the local build container; runs as root, as build-in-container.sh expects
+    container: debian:bookworm
+    timeout-minutes: 300
+    permissions:
+      contents: write   # only used by the release step on tags
+    steps:
+      - name: Install host tools
+        run: |
+          apt-get update -q
+          apt-get install -y -q git rsync unzip python3 python3-venv bc cpio file patch \
+            perl wget build-essential libncurses-dev ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: /opt/br-dl
+          key: br-dl-${{ hashFiles('configs/wt41n0_defconfig', 'package/**/*.mk', 'package/**/*.hash') }}
+          restore-keys: br-dl-
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          EXPORT_DIR="$GITHUB_WORKSPACE/images" ./build-in-container.sh defconfig all 2>&1 | tee build.log
+
+      - name: Check the loader of each image in an emulator
+        shell: bash
+        run: |
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install -q unicorn
+          for img in wt41n0-linux wt41n0-emmc wt41n0-install; do
+            out=$(/opt/venv/bin/python support/emulate_loader.py \
+              /opt/br-output/images/$img.entry.bin /opt/br-output/images/$img.blob.bin 2>&1 | tail -1)
+            echo "$img: $out" | tee -a build.log
+            case "$out" in PASS:*) ;; *) exit 1 ;; esac
+          done
+
+      - name: Short commit id
+        id: sha
+        shell: bash
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wt41n0-images-${{ steps.sha.outputs.short }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            images/wt41n0-install.hex
+            images/wt41n0-emmc.hex
+            images/wt41n0-linux.hex
+            images/rootfs.ext4.gz
+            build.log
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            images/wt41n0-install.hex
+            images/wt41n0-emmc.hex
+            images/wt41n0-linux.hex
+            images/rootfs.ext4.gz
