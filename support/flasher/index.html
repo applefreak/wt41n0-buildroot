@@ -41,6 +41,9 @@
   }
   .drop.over { border-color: var(--accent); color: var(--text); }
   .drop input { display: none; }
+  .latest { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .latest[hidden] { display: none; }
+  .latest span { color: var(--muted); font-size: 14px; }
   .facts { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 10px; white-space: pre-wrap; }
   button {
     font: inherit; padding: 8px 16px; border-radius: 7px; border: 1px solid var(--line);
@@ -77,6 +80,10 @@
 
   <section>
     <h2><span class="n">1</span>Choose the image</h2>
+    <div class="latest" id="latest" hidden>
+      <button id="useLatest">Use the latest release</button>
+      <span id="latestText"></span>
+    </div>
     <label class="drop" id="drop">
       <input type="file" id="file" accept=".hex">
       <span id="dropText">Drop <code>wt41n0-linux.hex</code> here, or click to choose a file</span>
@@ -289,6 +296,29 @@ const drop = $("drop");
 drop.addEventListener("drop", e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
 $("flash").addEventListener("click", flash);
 $("stop").addEventListener("click", () => { stopRequested = true; status("Stopping…", "warn"); });
+// The GitHub Pages copy of this page carries the latest release's install image in
+// latest/ (see .github/workflows/pages.yml); elsewhere latest/release.json is missing
+// and the button stays hidden.
+let latest = null;
+fetch("latest/release.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).then(rel => {
+  if (!rel || !rel.file) return;
+  latest = rel;
+  $("latestText").textContent = `${rel.tag}${rel.date ? ", " + rel.date.slice(0, 10) : ""}: ${rel.file}`;
+  $("latest").hidden = false;
+}).catch(() => {});
+$("useLatest").addEventListener("click", async () => {
+  if (!latest || busy) return;
+  $("useLatest").disabled = true;
+  status(`Downloading ${latest.file} (${latest.tag})…`);
+  try {
+    const r = await fetch("latest/" + latest.file, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await loadFile(new File([await r.blob()], `${latest.file} (${latest.tag})`));
+  } catch (e) {
+    status(`Could not download the latest release: ${e.message}`, "err");
+  }
+  $("useLatest").disabled = false;
+});
 window.addEventListener("beforeunload", e => { if (busy) { e.preventDefault(); e.returnValue = ""; } });
 </script>
 </body>

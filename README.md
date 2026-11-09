@@ -61,9 +61,12 @@ Nothing in `local/` is tracked by git.
 3. When the transfer finishes, power-cycle the unit.
 
 Without Python: `support/flasher/index.html` does the same in Chrome or Edge over
-WebUSB. Serve it locally (`cd support/flasher && python3 -m http.server 8000`, then open
-`http://localhost:8000`) or from any HTTPS host, choose the HEX file and click **Connect
-and flash**. On Windows, bind the WinUSB driver to the unit (`05e0:200b`) with Zadig first.
+WebUSB. It is published at <https://applefreak.github.io/wt41n0-buildroot/>
+(`.github/workflows/pages.yml`), or serve it locally (`cd support/flasher && python3 -m
+http.server 8000`, then open `http://localhost:8000`); choose the HEX file and click
+**Connect and flash**. On the published page, **Use the latest release** loads the
+latest release's `wt41n0-install.hex` instead (installs on a new unit, keeps an
+installed one). On Windows, bind the WinUSB driver to the unit (`05e0:200b`) with Zadig first.
 
 **Installing on the eMMC.** The system can also run from the eMMC, with an ext4 root
 file system that keeps every change: flash `output/images/wt41n0-install.hex` instead,

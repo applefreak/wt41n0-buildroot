@@ -87,3 +87,16 @@ jobs:
             images/wt41n0-emmc.hex
             images/wt41n0-linux.hex
             images/rootfs.ext4.gz
+
+  # Refresh the flasher page's "latest release" image (see pages.yml)
+  pages:
+    needs: images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Start the Pages deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

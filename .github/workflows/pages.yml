@@ -1,0 +1,56 @@
+# Publish the WebUSB flasher (support/flasher/) on GitHub Pages:
+# https://applefreak.github.io/wt41n0-buildroot/
+# with the latest release's wt41n0-install.hex in latest/, for the page's "Use the
+# latest release" button (the page cannot fetch release files from github.com).
+# One-time setup: repository Settings -> Pages -> Source: GitHub Actions.
+# build.yml starts this workflow after it publishes a release: a release made with the
+# workflow token does not fire the "release" event.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['support/flasher/**', '.github/workflows/pages.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Assemble the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _site/latest
+          cp -r support/flasher/. _site/
+          # latest non-draft, non-prerelease release; none yet = no button on the page
+          if tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null); then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern wt41n0-install.hex --dir _site/latest
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt \
+              -q '{tag: .tagName, date: .publishedAt, file: "wt41n0-install.hex"}' > _site/latest/release.json
+            cat _site/latest/release.json
+          else
+            echo "no release yet: publishing the flasher without the latest-release button"
+          fi
+          ls -la _site _site/latest
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
