@@ -34,10 +34,17 @@ LOCAL=$(cfg_str BR2_WT41N0_LOCAL_DIR)
 
 # Wi-Fi: only with the user's own configuration. The wpa_supplicant package
 # ships a sample file that would join any open network; never keep that one.
+# Without one, a configuration with no networks: the Settings app adds them
+# (update_config=1 lets wpa_supplicant save them).
 rm -f "$TARGET/etc/wpa_supplicant.conf"
 if [ -s "$LOCAL/wifi.conf" ]; then
 	install -m 0600 "$LOCAL/wifi.conf" "$TARGET/etc/wpa_supplicant.conf"
+else
+	printf 'ctrl_interface=/var/run/wpa_supplicant\n' > "$TARGET/etc/wpa_supplicant.conf"
+	chmod 0600 "$TARGET/etc/wpa_supplicant.conf"
 fi
+grep -q '^update_config=' "$TARGET/etc/wpa_supplicant.conf" ||
+	sed -i '1a update_config=1' "$TARGET/etc/wpa_supplicant.conf"
 
 # ssh: root logs in with a key; password logins work only if a root password
 # is set (BR2_TARGET_GENERIC_ROOT_PASSWD), since dropbear refuses empty ones.

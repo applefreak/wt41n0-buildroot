@@ -30,6 +30,25 @@ void platform_resume(void);
 int platform_wait_key(int timeout_ms, unsigned int *code, int *value);
 int platform_vt_activate(int vt);
 
+/* Benchmark counters (platform_linux.c), for WT41N0_UI_BENCH */
+struct bench_stats {
+	uint64_t flush_us, pixels, last_flush;
+	unsigned int frames;
+};
+extern struct bench_stats bench;
+uint64_t platform_us(void);
+
+/* Style hooks (ui_style.c) */
+void style_ring(lv_obj_t *ring, lv_obj_t *target, const lv_color_t *override);
+int style_ring_inset(void);
+
+/* Focus ring and screen transitions (ui_focus.c) */
+void focus_init(lv_group_t *g);
+void focus_ring_create(lv_obj_t *scr);
+lv_screen_load_anim_t focus_take_transition(void);
+
+void ui_hint_save(char *pairs, size_t plen, char *marker, size_t mlen);
+
 /* Esc handler (ui_keys.c) */
 void keys_set_back(void (*cb)(void));
 

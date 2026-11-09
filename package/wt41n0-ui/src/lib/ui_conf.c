@@ -6,6 +6,9 @@
 
 #define MAX_LINES 64
 
+int ui_conf_get(const char *key, char *buf, size_t len) { return conf_get(key, buf, len); }
+int ui_conf_set(const char *key, const char *value) { return conf_set(key, value); }
+
 /* Copy the value of key into buf; returns 0 when found */
 int conf_get(const char *key, char *buf, size_t len)
 {

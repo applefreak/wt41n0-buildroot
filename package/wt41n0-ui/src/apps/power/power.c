@@ -1,44 +1,57 @@
-/* Power: reboot or power off, each confirmed by pressing Enter a second time. */
+/*
+ * Power (SPEC.md, Screens > Power): REBOOT (key 1) and POWER OFF (key 2) as big buttons.
+ * The first ENT arms one (CONFIRM ..., warning border, 5 s countdown); a second ENT acts;
+ * ESC or the timeout disarms. A digit focuses its button and arms it.
+ */
 #include <stdlib.h>
 #include "wt41n0ui.h"
 
-static lv_obj_t *rows[2];
-static int armed = -1;			/* row waiting for its confirmation */
+#define IDLE_HINT "\xE2\x86\x91\xE2\x86\x93 SELECT|ENT CHOOSE|ESC BACK"
+
+static lv_obj_t *buttons[2];
 
 static void quit(void)
 {
 	ui_quit(0);
 }
 
-static void choose(lv_event_t *e)
+static void act(void *data)
 {
-	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	int i = (int)(intptr_t)data;
+	lv_obj_t *c = lv_obj_get_parent(buttons[0]);
 
-	if (armed != i) {		/* first press: ask for confirmation */
-		armed = i;
-		ui_list_button_set_text(rows[0], LV_SYMBOL_REFRESH, i == 0 ? "REBOOT  // AGAIN TO CONFIRM" : "REBOOT");
-		ui_list_button_set_text(rows[1], LV_SYMBOL_POWER, i == 1 ? "POWER OFF  // AGAIN TO CONFIRM" : "POWER OFF");
-		return;
-	}
-	ui_list_button_set_text(rows[i], NULL, i == 0 ? "REBOOTING ..." : "POWERING OFF ...");
+	ui_status_line(c, UI_TONE_ACCENT, i ? "power" : "refresh", i ? "POWERING OFF" : "REBOOTING", "");
 	lv_refr_now(NULL);
-	if (system(i == 0 ? "reboot" : "poweroff") != 0) {
-		ui_list_button_set_text(rows[i], LV_SYMBOL_WARNING, i == 0 ? "REBOOT FAILED" : "POWER OFF FAILED");
-		armed = -1;
+#ifndef WT41N0_UI_HOST
+	if (system(i ? "poweroff" : "reboot") != 0)
+		ui_status_line(c, UI_TONE_WARN, "warning", i ? "POWER OFF FAILED" : "REBOOT FAILED", "");
+#endif
+}
+
+static void digit(lv_event_t *e)
+{
+	uint32_t k = lv_event_get_key(e);
+
+	if (k == '1' || k == '2') {
+		lv_group_focus_obj(buttons[k - '1']);
+		lv_obj_send_event(buttons[k - '1'], LV_EVENT_CLICKED, NULL);
 	}
 }
 
 int main(void)
 {
-	lv_obj_t *list;
+	lv_obj_t *c;
 
 	ui_init();
-	list = ui_list(ui_screen("POWER"));
-	ui_hint("ENTER TWICE TO CONFIRM   ESC BACK");
+	c = ui_screen("POWER");
+	ui_hint_keys(IDLE_HINT, "");
 	ui_on_back(quit);
-	rows[0] = ui_list_button(list, LV_SYMBOL_REFRESH, "REBOOT");
-	rows[1] = ui_list_button(list, LV_SYMBOL_POWER, "POWER OFF");
-	lv_obj_add_event_cb(rows[0], choose, LV_EVENT_CLICKED, (void *)0);
-	lv_obj_add_event_cb(rows[1], choose, LV_EVENT_CLICKED, (void *)1);
+	buttons[0] = ui_big_button(c, 48, "refresh", "REBOOT", "RESTARTS THE LAUNCHER AND ALL APPS", "KEY 1",
+				   IDLE_HINT, act, (void *)0);
+	buttons[1] = ui_big_button(c, 128, "power", "POWER OFF", "SHUTS THE UNIT DOWN", "KEY 2",
+				   IDLE_HINT, act, (void *)1);
+	lv_obj_add_event_cb(buttons[0], digit, LV_EVENT_KEY, NULL);
+	lv_obj_add_event_cb(buttons[1], digit, LV_EVENT_KEY, NULL);
+	lv_group_focus_obj(buttons[0]);
 	return ui_run();
 }

@@ -17,7 +17,7 @@ static const lv_point_t targets[NPOINTS] = {
 };
 
 static struct {
-	lv_obj_t *cross, *step, *msg;
+	lv_obj_t *scr, *cross, *xh, *xv, *xring, *xdot, *step, *msg, *detail, *ghost, *dots[NPOINTS];
 	lv_timer_t *timer;
 	void (*done)(bool saved);
 	int index;
@@ -80,10 +80,43 @@ static bool fit(double out[6])
 	return solve3(m, vx, out) && solve3(m, vy, out + 3);
 }
 
+#define XHAIR WT_XHAIR_SIZE
+
+static void cross_color(lv_color_t c)
+{
+	lv_obj_set_style_bg_color(cal.xh, c, 0);
+	lv_obj_set_style_bg_color(cal.xv, c, 0);
+	lv_obj_set_style_border_color(cal.xring, c, 0);
+	lv_obj_set_style_bg_color(cal.xdot, c, 0);
+}
+
+/* the instruction sits away from the target: below it for the centre, mid-screen else */
 static void show_target(void)
 {
-	lv_obj_set_pos(cal.cross, targets[cal.index].x - 16, targets[cal.index].y - 16);
-	lv_label_set_text_fmt(cal.step, "%d/%d", cal.index + 1, NPOINTS);
+	const ui_palette_t *p = ui_palette();
+	bool centre = targets[cal.index].x == WT_SCREEN_W / 2;
+	int i;
+
+	lv_obj_set_pos(cal.cross, targets[cal.index].x - XHAIR / 2, targets[cal.index].y - XHAIR / 2);
+	lv_label_set_text_fmt(cal.step, "STEP %d/%d", cal.index + 1, NPOINTS);
+	for (i = 0; i < NPOINTS; i++)
+		lv_obj_set_style_bg_color(cal.dots[i], i < cal.index ? p->accent : i == cal.index ? p->text : p->line, 0);
+	lv_obj_align(cal.msg, LV_ALIGN_TOP_MID, 0, centre ? 160 : 108);
+	lv_obj_align_to(cal.detail, cal.msg, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
+}
+
+static void miss(int err, double x, double y)
+{
+	const ui_palette_t *p = ui_palette();
+
+	cross_color(p->warn);
+	lv_obj_set_pos(cal.ghost, (int)x - 10, (int)y - 10);
+	lv_obj_remove_flag(cal.ghost, LV_OBJ_FLAG_HIDDEN);
+	lv_label_set_text(cal.msg, "TRY AGAIN");
+	lv_label_set_text_fmt(cal.detail, "MISSED BY %d PX", err);
+	lv_obj_set_style_text_color(cal.detail, p->warn, 0);
+	cal.index = 0;
+	show_target();
 }
 
 static void finish(bool saved)
@@ -103,7 +136,9 @@ static void complete(void)
 	char buf[256];
 
 	if (!fit(c)) {
-		lv_label_set_text(cal.msg, "CALIBRATION FAILED // TRY AGAIN");
+		lv_label_set_text(cal.msg, "TRY AGAIN");
+		lv_label_set_text(cal.detail, "THE TAPS DID NOT FIT");
+		lv_obj_set_style_text_color(cal.detail, ui_palette()->warn, 0);
 		cal.index = 0;
 		show_target();
 		return;
@@ -112,9 +147,7 @@ static void complete(void)
 	y = c[3] * cal.raw_x[5] + c[4] * cal.raw_y[5] + c[5];
 	err = hypot(x - targets[5].x, y - targets[5].y);
 	if (err > MAX_ERROR) {
-		lv_label_set_text_fmt(cal.msg, "MISSED BY %d PX // TRY AGAIN", (int)err);
-		cal.index = 0;
-		show_target();
+		miss((int)err, x, y);
 		return;
 	}
 	snprintf(buf, sizeof(buf), "%.8g %.8g %.8g %.8g %.8g %.8g", c[0], c[1], c[2], c[3], c[4], c[5]);
@@ -144,6 +177,12 @@ static void poll_cb(lv_timer_t *t)
 	if (cal.samples >= MIN_SAMPLES) {
 		cal.raw_x[cal.index] = (double)cal.sum_x / cal.samples;
 		cal.raw_y[cal.index] = (double)cal.sum_y / cal.samples;
+		if (cal.index == 0) {		/* a new round: the miss goes */
+			cross_color(ui_palette()->accent);
+			lv_obj_add_flag(cal.ghost, LV_OBJ_FLAG_HIDDEN);
+			lv_label_set_text(cal.msg, "TAP THE CENTRE OF THE CROSSHAIR");
+			lv_label_set_text(cal.detail, "");
+		}
 		if (++cal.index == NPOINTS)
 			complete();
 		else
@@ -168,55 +207,100 @@ static lv_obj_t *bar(lv_obj_t *parent, int w, int h, int x, int y, lv_color_t co
 	lv_obj_set_pos(o, x, y);
 	lv_obj_set_style_bg_color(o, color, 0);
 	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+	lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 	return o;
 }
 
+static lv_obj_t *circle(lv_obj_t *parent, int d, int x, int y)
+{
+	lv_obj_t *o = bar(parent, d, d, x, y, ui_palette()->bg);
+
+	lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+	return o;
+}
+
+static lv_obj_t *text(lv_obj_t *parent, ui_role_t role, lv_color_t c, const char *s)
+{
+	lv_obj_t *l = lv_label_create(parent);
+
+	lv_label_set_text(l, s);
+	ui_text_role(l, role);
+	lv_obj_set_style_text_color(l, c, 0);
+	return l;
+}
+
+/* Full screen (SPEC.md, Screens > Touch calibration): CALIBRATE chip and STEP n/6 top
+ * left, six progress dots top right, the 40 px crosshair (20 px ring, 2 px cross, 4 px dot
+ * on a 12 px background disc), the instruction away from the target, ESC SKIP */
 void ui_touch_calibrate(void (*done)(bool saved))
 {
 	const ui_palette_t *p = ui_palette();
-	lv_obj_t *scr, *old, *ring, *title, *keys;
+	lv_obj_t *scr, *old, *o, *row;
+	int i;
 
 	scr = lv_obj_create(NULL);
+	cal.scr = scr;
 	lv_obj_remove_style_all(scr);
 	lv_obj_set_style_bg_color(scr, p->bg, 0);
 	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-	title = lv_label_create(scr);
-	lv_label_set_text(title, "TOUCH CALIBRATION");
-	lv_obj_set_style_text_font(title, ui_font(16), 0);
-	lv_obj_set_style_text_color(title, p->accent, 0);
-	lv_obj_align(title, LV_ALIGN_CENTER, 0, -46);
-	cal.msg = lv_label_create(scr);
-	lv_label_set_text(cal.msg, "TAP THE CENTRE OF THE CROSSHAIR");
-	lv_obj_set_style_text_font(cal.msg, ui_font(12), 0);
-	lv_obj_set_style_text_color(cal.msg, p->text, 0);
-	lv_obj_align(cal.msg, LV_ALIGN_CENTER, 0, 40);
-	cal.step = lv_label_create(scr);
-	lv_obj_set_style_text_font(cal.step, ui_font(12), 0);
-	lv_obj_set_style_text_color(cal.step, p->dim, 0);
-	lv_obj_align(cal.step, LV_ALIGN_CENTER, 0, 58);
-	keys = lv_label_create(scr);
-	lv_label_set_text(keys, "ESC SKIP");
-	lv_obj_set_style_text_font(keys, ui_font(12), 0);
-	lv_obj_set_style_text_color(keys, p->dim, 0);
-	lv_obj_align(keys, LV_ALIGN_CENTER, 0, 76);
+	o = ui_chip(scr, UI_ROLE_NAME, "CALIBRATE");
+	lv_obj_set_pos(o, 8, 6);
+	cal.step = text(scr, UI_ROLE_NAME, p->text, "");
+	lv_obj_align_to(cal.step, o, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+	row = lv_obj_create(scr);
+	lv_obj_remove_style_all(row);
+	lv_obj_set_size(row, NPOINTS * 9 - 3, 6);
+	lv_obj_align(row, LV_ALIGN_TOP_RIGHT, -8, 9);
+	for (i = 0; i < NPOINTS; i++) {
+		cal.dots[i] = bar(row, 6, 6, i * 9, 0, p->line);
+		if (ui_theme_style() == WT_STYLE_AERO)
+			lv_obj_set_style_radius(cal.dots[i], LV_RADIUS_CIRCLE, 0);
+	}
 
-	/* crosshair: 32x32, a ring and two lines */
+	cal.msg = text(scr, UI_ROLE_NAME, p->text, "TAP THE CENTRE OF THE CROSSHAIR");
+	cal.detail = text(scr, UI_ROLE_DATA, p->dim, "");
+	o = ui_hint_key(scr, "ESC", false);
+	lv_obj_set_pos(o, 8, WT_HINT_Y + 1);
+	o = text(scr, UI_ROLE_HINT, p->dim, "SKIP");
+	lv_obj_set_pos(o, 40, WT_HINT_Y + 1);
+	o = text(scr, UI_ROLE_HINT, p->dim, "TAP WITH THE STYLUS");
+	lv_obj_align(o, LV_ALIGN_TOP_RIGHT, -8, WT_HINT_Y + 1);
+
+	/* ghost ring where a missed tap landed: dashed, eight arcs */
+	cal.ghost = lv_obj_create(scr);
+	lv_obj_remove_style_all(cal.ghost);
+	lv_obj_set_size(cal.ghost, 20, 20);
+	lv_obj_remove_flag(cal.ghost, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	for (i = 0; i < 8; i++) {
+		o = lv_arc_create(cal.ghost);
+		lv_obj_remove_style_all(o);
+		lv_obj_set_size(o, 20, 20);
+		lv_arc_set_bg_angles(o, i * 45, i * 45 + 25);
+		lv_obj_set_style_arc_width(o, 1, LV_PART_MAIN);
+		lv_obj_set_style_arc_color(o, p->warn, LV_PART_MAIN);
+		lv_obj_set_style_arc_opa(o, LV_OPA_COVER, LV_PART_MAIN);
+		lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+	}
+	lv_obj_add_flag(cal.ghost, LV_OBJ_FLAG_HIDDEN);
+
+	/* crosshair: 40 x 40 */
 	cal.cross = lv_obj_create(scr);
 	lv_obj_remove_style_all(cal.cross);
-	lv_obj_set_size(cal.cross, 33, 33);
-	bar(cal.cross, 33, 1, 0, 16, p->accent);
-	bar(cal.cross, 1, 33, 16, 0, p->accent);
-	ring = lv_obj_create(cal.cross);
-	lv_obj_remove_style_all(ring);
-	lv_obj_set_size(ring, 15, 15);
-	lv_obj_set_pos(ring, 9, 9);
-	lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_border_color(ring, p->accent2, 0);
-	lv_obj_set_style_border_width(ring, 2, 0);
+	lv_obj_set_size(cal.cross, XHAIR, XHAIR);
+	lv_obj_remove_flag(cal.cross, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+	cal.xh = bar(cal.cross, XHAIR, 2, 0, XHAIR / 2 - 1, p->accent);
+	cal.xv = bar(cal.cross, 2, XHAIR, XHAIR / 2 - 1, 0, p->accent);
+	cal.xring = circle(cal.cross, 20, XHAIR / 2 - 10, XHAIR / 2 - 10);
+	lv_obj_set_style_bg_opa(cal.xring, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cal.xring, 1, 0);
+	circle(cal.cross, 12, XHAIR / 2 - 6, XHAIR / 2 - 6);
+	cal.xdot = circle(cal.cross, 4, XHAIR / 2 - 2, XHAIR / 2 - 2);
+	cross_color(p->accent);
 
-	/* Esc through the keypad group */
+	/* Esc through the keypad group (not the previous screen's back action) */
+	keys_set_back(NULL);
 	lv_group_remove_all_objs(ui_group());
 	lv_obj_add_event_cb(scr, key_cb, LV_EVENT_KEY, NULL);
 	lv_group_add_obj(ui_group(), scr);

@@ -1,6 +1,7 @@
 #!/bin/sh
-# Wi-Fi on wlan0 with wpa_supplicant and DHCP. Does nothing unless
-# /etc/wpa_supplicant.conf exists (put yours in the BSP's local/wifi.conf).
+# Wi-Fi on wlan0 with wpa_supplicant and DHCP, and the clock from NTP. Networks come
+# from /etc/wpa_supplicant.conf (the BSP's local/wifi.conf, or added with the
+# Settings app); the build installs one without networks when there is no local one.
 #
 # A small supervisor runs in the background, so the boot does not wait for the
 # network: it starts wpa_supplicant (and restarts it if it ever exits), runs the
@@ -22,6 +23,8 @@ supervise() {
 			# DHCP client, once; it keeps retrying in the background on its own
 			[ -f $PIDDIR/udhcpc.wlan0.pid ] ||
 				udhcpc -S -i wlan0 -b -t 5 -T 3 -A 5 -p $PIDDIR/udhcpc.wlan0.pid >/dev/null 2>&1 &
+			# network time; ntpd keeps retrying until the network is up
+			pidof ntpd >/dev/null || ntpd -p pool.ntp.org
 			sleep 2
 			continue
 		fi

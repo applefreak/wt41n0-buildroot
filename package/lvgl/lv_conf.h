@@ -3,7 +3,7 @@
  * Configuration file for v9.2.2
  *
  * WT41N0: lv_conf_template.h with these changes: C library malloc/string/sprintf,
- * 16 ms refresh, logging (warnings; the app installs the print callback), image cache, Montserrat 12/28 (symbols),
+ * 16 ms refresh, logging (warnings; the app installs the print callback), image cache, Montserrat 12/18/24/28 (symbols),
  * POSIX file system on letter A, PNG decoding, TinyTTF from files, snapshot, performance
  * monitor, dark default theme, no examples. No LVGL display/input drivers: the
  * wt41n0-ui library drives the framebuffer and evdev itself.
@@ -485,10 +485,10 @@
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 0
-#define LV_FONT_MONTSERRAT_18 0
+#define LV_FONT_MONTSERRAT_18 1
 #define LV_FONT_MONTSERRAT_20 0
 #define LV_FONT_MONTSERRAT_22 0
-#define LV_FONT_MONTSERRAT_24 0
+#define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_MONTSERRAT_26 0
 #define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_30 0

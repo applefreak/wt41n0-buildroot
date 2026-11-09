@@ -1,0 +1,41 @@
+I: Bus=0019 Vendor=0001 Product=0001 Version=0001
+N: Name="4a31c000.keypad"
+P: Phys=
+S: Sysfs=/devices/platform/ocp/4a300000.interconnect/4a300000.interconnect:segment@10000/4a31c000.target-module/4a31c000.keypad/input/input0
+U: Uniq=
+H: Handlers=sysrq kbd event0 
+B: PROP=0
+B: EV=13
+B: KEY=1090 0 5300400 3000cffe
+B: MSC=10
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="twl6030_pwrbutton"
+P: Phys=twl6030_pwrbutton/input0
+S: Sysfs=/devices/platform/ocp/48000000.interconnect/48000000.interconnect:segment@0/48070000.target-module/48070000.i2c/i2c-0/0-0048/48070000.i2c:twl@48:pwrbutton/input/input1
+U: Uniq=
+H: Handlers=kbd event1 
+B: PROP=0
+B: EV=3
+B: KEY=100000 0 0 0
+
+I: Bus=0018 Vendor=0000 Product=0000 Version=0000
+N: Name="SX8654 I2C Touchscreen"
+P: Phys=
+S: Sysfs=/devices/platform/ocp/48000000.interconnect/48000000.interconnect:segment@200000/48350000.target-module/48350000.i2c/i2c-3/3-0049/input/input2
+U: Uniq=
+H: Handlers=event2 
+B: PROP=2
+B: EV=b
+B: KEY=400 0 0 0 0 0 0 0 0 0 0
+B: ABS=3
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="WT41N0 Headset Jack"
+P: Phys=ALSA
+S: Sysfs=/devices/platform/sound/sound/card0/input3
+U: Uniq=
+H: Handlers=event3 
+B: PROP=0
+B: EV=21
+B: SW=14

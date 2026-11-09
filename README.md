@@ -23,6 +23,7 @@ file is needed to build it.
 | Audio | built-in speaker through ALSA (`aplay file.wav`); built-in microphone records, but at the wrong rate for now |
 | Battery, charging | battery voltage, capacity, current and temperature in `/sys/class/power_supply`; charges in the cradle, with the middle LED blinking orange |
 | Ring scanner | barcodes from the ring scanner with its trigger (`wt41n0-scan`); the accessory ports also work as a plain serial port (`wt41n0-fpga serial on`, `/dev/ttyS1`) |
+| Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, System (device IDs, hardware and live sensor readings) and Power; four visual styles (CYBER, AERO, DECK, NUKE) |
 | Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC root file system that keeps every change (`support/install.py`) |
 
 Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, suspend.
@@ -88,6 +89,11 @@ The unit boots to a root shell on its LCD, driven by the keypad. Easier ways in:
 - **USB serial**: the unit appears as a serial port on the host
   (`screen /dev/ttyACM0 115200`, or `support/console.py '<command>'`).
 
+The launcher's settings live in `/etc/wt41n0/ui.conf` (`style=`, `palette=`,
+`accent=`, where palette and accent can be `auto` for the style's defaults; also
+`brightness=`, `volume=`, `tz=`, `input=`, `touch_cal=`). Apps are listed by the manifests
+in `/usr/share/wt41n0/apps`.
+
 ## Customize
 
 Everything is ordinary Buildroot: `make menuconfig` for packages,
@@ -112,6 +118,7 @@ board/zebra/wt41n0/               device tree, kernel patches and config fragmen
                                   root filesystem overlay, post-build/post-image scripts
 package/wt41n0-loader/            loader the bootloader jumps to
 package/wt41n0-utils/             small board tools (pcmtest, keys, ...)
+package/wt41n0-ui/                the launcher, its apps and their LVGL library
 support/                          host tools: mkhex.py, flash.py, console.py, keymap.py,
                                   flasher/ (the same flashing as a WebUSB web page)
 docs/                             hardware notes and how the boot works

@@ -57,24 +57,73 @@ static void cycle(int *layer)
 	*layer = *layer == OFF ? ONCE : *layer == ONCE ? LOCKED : OFF;
 }
 
-/* The LVGL key for a symbol; 0 = nothing to send */
+/*
+ * The LVGL key for a symbol; 0 = nothing to send. LVGL's keypad mode sends keys to
+ * the focused widget and moves the focus on NEXT/PREV. Up and Down move the focus,
+ * except on the on-screen keyboard (rows; 4 and 6 move left and right, the plain
+ * keypad has no Left/Right keys) and on a slider being adjusted (Enter starts and
+ * ends adjusting; the group's "editing" flag marks it).
+ */
 static uint32_t lv_key_for(int sym)
 {
-	bool editing = keys_group && lv_group_get_editing(keys_group);
+	lv_obj_t *f = keys_group ? lv_group_get_focused(keys_group) : NULL;
+	bool kb = f && lv_obj_check_type(f, &lv_keyboard_class);
+	bool slider = f && lv_obj_check_type(f, &lv_slider_class);
+	/* "editing": a slider being adjusted, a slider card adjusting, a button armed */
+	bool adjusting = f && lv_group_get_editing(keys_group);
+	bool arrows = kb || adjusting;
 
+	if (kb && (sym == '4' || sym == '6'))
+		return sym == '4' ? LV_KEY_LEFT : LV_KEY_RIGHT;
 	if (sym > 0)
 		return (uint32_t)sym;
 	switch (sym) {
 	case UI_SYM_ESC:	return LV_KEY_ESC;
 	case UI_SYM_TAB:	return LV_KEY_NEXT;
 	case UI_SYM_BACKSPACE:	return LV_KEY_BACKSPACE;
-	case UI_SYM_ENTER:	return LV_KEY_ENTER;
-	case UI_SYM_UP:		return editing ? LV_KEY_UP : LV_KEY_PREV;
-	case UI_SYM_DOWN:	return editing ? LV_KEY_DOWN : LV_KEY_NEXT;
-	case UI_SYM_LEFT:	return editing ? LV_KEY_LEFT : LV_KEY_PREV;
-	case UI_SYM_RIGHT:	return editing ? LV_KEY_RIGHT : LV_KEY_NEXT;
+	case UI_SYM_ENTER:
+		if (slider) {
+			lv_group_set_editing(keys_group, !adjusting);
+			return 0;
+		}
+		return LV_KEY_ENTER;
+	case UI_SYM_UP:		return arrows ? LV_KEY_UP : LV_KEY_PREV;
+	case UI_SYM_DOWN:	return arrows ? LV_KEY_DOWN : LV_KEY_NEXT;
+	case UI_SYM_LEFT:	return arrows ? LV_KEY_LEFT : LV_KEY_PREV;
+	case UI_SYM_RIGHT:	return arrows ? LV_KEY_RIGHT : LV_KEY_NEXT;
 	default:		return 0;	/* F1..F10, Ctrl: unused */
 	}
+}
+
+/* Esc: closes the on-screen keyboard, ends adjusting a slider, cancels what the focused
+ * element is doing (a slider card adjusting, a button armed: it gets the ESC key and
+ * clears the editing flag itself), else goes back */
+static bool handle_esc(void)
+{
+	lv_obj_t *f = keys_group ? lv_group_get_focused(keys_group) : NULL;
+
+	if (f && lv_obj_check_type(f, &lv_keyboard_class)) {
+		lv_obj_send_event(f, LV_EVENT_CANCEL, NULL);
+		return true;
+	}
+	if (f && lv_obj_check_type(f, &lv_slider_class) && lv_group_get_editing(keys_group)) {
+		lv_group_set_editing(keys_group, false);
+		return true;
+	}
+	if (f && lv_group_get_editing(keys_group)) {
+		uint32_t esc = LV_KEY_ESC;
+
+		lv_obj_send_event(f, LV_EVENT_KEY, &esc);
+		lv_group_set_editing(keys_group, false);
+		return true;
+	}
+	if (back_cb) {
+		ui_screen_transition(UI_SLIDE_OUT);
+		back_cb();
+		ui_screen_transition(UI_SLIDE_IN);
+		return true;
+	}
+	return false;
 }
 
 void keys_event(unsigned int code, int value)
@@ -139,10 +188,8 @@ void keys_event(unsigned int code, int value)
 	else
 		layer = UI_LAYER_PLAIN;
 	key = lv_key_for(k->sym[layer]);
-	/* Esc goes back, unless a widget is being edited (then it ends the editing) */
-	if (key == LV_KEY_ESC && back_cb && !(keys_group && lv_group_get_editing(keys_group))) {
-		back_code = code;
-		back_cb();
+	if (key == LV_KEY_ESC && handle_esc()) {
+		back_code = code;	/* swallow its release too */
 		return;
 	}
 	/* one-shot layers end with the key they applied to */

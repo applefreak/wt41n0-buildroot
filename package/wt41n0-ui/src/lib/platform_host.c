@@ -8,7 +8,7 @@
 #include "ui_internal.h"
 #include "platform_host.h"
 
-static uint16_t screen[UI_HEIGHT][UI_WIDTH];
+static uint16_t screen[WT_SCREEN_H][WT_SCREEN_W];
 static uint32_t now_ms;
 
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -32,8 +32,8 @@ const char *platform_conf_path(void)
 
 void platform_init(void)
 {
-	static uint16_t buf1[UI_WIDTH * 40], buf2[UI_WIDTH * 40];
-	lv_display_t *disp = lv_display_create(UI_WIDTH, UI_HEIGHT);
+	static uint16_t buf1[WT_SCREEN_W * 40], buf2[WT_SCREEN_W * 40];
+	lv_display_t *disp = lv_display_create(WT_SCREEN_W, WT_SCREEN_H);
 
 	lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 	lv_display_set_flush_cb(disp, flush_cb);
@@ -100,6 +100,15 @@ void host_advance(uint32_t ms)
 	}
 }
 
+/* press and release, then only 10 ms so an animation can be caught mid-way */
+void keys_press_only(unsigned int code)
+{
+	keys_event(code, 1);
+	host_advance(10);
+	keys_event(code, 0);
+	host_advance(10);
+}
+
 void host_key(unsigned int code)
 {
 	keys_event(code, 1);
@@ -110,8 +119,8 @@ void host_key(unsigned int code)
 
 int host_shot(const char *path)
 {
-	unsigned char row[UI_WIDTH * 3], hdr[54] = { 'B', 'M' };
-	unsigned int size = sizeof(hdr) + sizeof(row) * UI_HEIGHT;
+	unsigned char row[WT_SCREEN_W * 3], hdr[54] = { 'B', 'M' };
+	unsigned int size = sizeof(hdr) + sizeof(row) * WT_SCREEN_H;
 	FILE *f = fopen(path, "wb");
 	int x, y;
 
@@ -120,12 +129,12 @@ int host_shot(const char *path)
 	lv_refr_now(NULL);
 	hdr[2] = size; hdr[3] = size >> 8; hdr[4] = size >> 16;
 	hdr[10] = 54; hdr[14] = 40;
-	hdr[18] = UI_WIDTH & 0xff; hdr[19] = UI_WIDTH >> 8;
-	hdr[22] = UI_HEIGHT & 0xff; hdr[23] = UI_HEIGHT >> 8;
+	hdr[18] = WT_SCREEN_W & 0xff; hdr[19] = WT_SCREEN_W >> 8;
+	hdr[22] = WT_SCREEN_H & 0xff; hdr[23] = WT_SCREEN_H >> 8;
 	hdr[26] = 1; hdr[28] = 24;
 	fwrite(hdr, 1, sizeof(hdr), f);
-	for (y = UI_HEIGHT - 1; y >= 0; y--) {	/* BMP rows go bottom-up, BGR */
-		for (x = 0; x < UI_WIDTH; x++) {
+	for (y = WT_SCREEN_H - 1; y >= 0; y--) {	/* BMP rows go bottom-up, BGR */
+		for (x = 0; x < WT_SCREEN_W; x++) {
 			uint16_t c = screen[y][x];
 
 			row[x * 3 + 2] = (unsigned char)(((c >> 11) & 0x1f) * 255 / 31);

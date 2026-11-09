@@ -9,6 +9,9 @@
  *	Exec=/usr/bin/wt41n0-scanner-app
  *	Type=lvgl		lvgl: full-screen graphical app; console: text app on tty2
  *	Order=20		position on the home screen (low first)
+ *	Id=scanner		built-in live readout to use (default: the icon name)
+ *	Status=/usr/bin/cmd	for other apps: prints "meta|line|level" (level 0-8 or -1),
+ *				shown on the tile and in the readout strip
  *
  * While an app runs the launcher steps aside. Holding Esc for 1.5 s brings the
  * launcher back: a console app keeps running on tty2 (and is returned to next time),
@@ -93,8 +96,14 @@ static int load_one(const char *path, struct app *a)
 			a->type = !strcmp(v, "console") ? APP_CONSOLE : APP_LVGL;
 		else if (!strcmp(line, "Order"))
 			a->order = atoi(v);
+		else if (!strcmp(line, "Id"))
+			snprintf(a->id, sizeof(a->id), "%s", v);
+		else if (!strcmp(line, "Status"))
+			snprintf(a->status_cmd, sizeof(a->status_cmd), "%s", v);
 	}
 	fclose(f);
+	if (!a->id[0])
+		snprintf(a->id, sizeof(a->id), "%s", a->icon);
 	return a->name[0] && a->exec[0] ? 0 : -1;
 }
 
@@ -261,8 +270,10 @@ int apps_launch(struct app *app)
 	exit_status = 0;
 	ui_suspend();
 	if (app->type == APP_CONSOLE) {
-		if (!alive(app->pid))
+		if (!alive(app->pid)) {
 			app->pid = start_console(app->exec);
+			app->started = time(NULL);
+		}
 		if (ui_console_activate(CONSOLE_VT) == 0)
 			wait_app(app->pid);	/* the console app stays for next time */
 		else

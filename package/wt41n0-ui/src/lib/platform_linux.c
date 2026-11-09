@@ -68,16 +68,27 @@ const char *platform_conf_path(void)
 
 /* ---- display ------------------------------------------------------------------ */
 
+struct bench_stats bench;
+
+uint64_t platform_us(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
 	const uint16_t *src = (const uint16_t *)px_map;
 	int w = lv_area_get_width(area);
 	int x, y;
+	uint64_t t0 = platform_us();
 
 	if (rotated) {
-		/* view (x, y) -> fb (y, UI_WIDTH - 1 - x): write each fb row sequentially */
+		/* view (x, y) -> fb (y, WT_SCREEN_W - 1 - x): write each fb row sequentially */
 		for (x = area->x1; x <= area->x2; x++) {
-			uint16_t *dst = fb + (size_t)(UI_WIDTH - 1 - x) * fb_stride + area->y1;
+			uint16_t *dst = fb + (size_t)(WT_SCREEN_W - 1 - x) * fb_stride + area->y1;
 			const uint16_t *s = src + (x - area->x1);
 
 			for (y = area->y1; y <= area->y2; y++, s += w)
@@ -88,6 +99,11 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 			memcpy(fb + (size_t)y * fb_stride + area->x1, src + (size_t)(y - area->y1) * w,
 			       (size_t)w * 2);
 	}
+	bench.flush_us += platform_us() - t0;
+	bench.pixels += (uint64_t)w * lv_area_get_height(area);
+	bench.last_flush = platform_us();
+	if (lv_display_flush_is_last(disp))
+		bench.frames++;
 	lv_display_flush_ready(disp);
 }
 
@@ -114,7 +130,7 @@ static void display_init(void)
 	const char *tty = getenv("WT41N0_UI_TTY");
 	struct fb_var_screeninfo var;
 	struct fb_fix_screeninfo fix;
-	static uint16_t buf1[UI_WIDTH * BUF_LINES], buf2[UI_WIDTH * BUF_LINES];
+	static uint16_t buf1[WT_SCREEN_W * BUF_LINES], buf2[WT_SCREEN_W * BUF_LINES];
 	lv_display_t *disp;
 	int fd;
 
@@ -130,8 +146,8 @@ static void display_init(void)
 	fb_w = var.xres;
 	fb_h = var.yres;
 	fb_stride = fix.line_length / 2;
-	rotated = fb_w == UI_HEIGHT && fb_h == UI_WIDTH;
-	if (!rotated && !(fb_w >= UI_WIDTH && fb_h >= UI_HEIGHT)) {
+	rotated = fb_w == WT_SCREEN_H && fb_h == WT_SCREEN_W;
+	if (!rotated && !(fb_w >= WT_SCREEN_W && fb_h >= WT_SCREEN_H)) {
 		fprintf(stderr, "wt41n0ui: unexpected framebuffer %ux%u\n", fb_w, fb_h);
 		exit(1);
 	}
@@ -158,7 +174,7 @@ static void display_init(void)
 	signal(SIGINT, on_signal);
 	signal(SIGHUP, on_signal);
 
-	disp = lv_display_create(UI_WIDTH, UI_HEIGHT);
+	disp = lv_display_create(WT_SCREEN_W, WT_SCREEN_H);
 	lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 	lv_display_set_flush_cb(disp, flush_cb);
 	lv_display_set_buffers(disp, buf1, buf2, sizeof(buf1), LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -230,11 +246,11 @@ static int clamp(double v, int size)
 static void touch_commit(void)
 {
 	if (touch.have_cal) {
-		touch.point.x = clamp(touch.cal[0] * touch.raw_x + touch.cal[1] * touch.raw_y + touch.cal[2], UI_WIDTH);
-		touch.point.y = clamp(touch.cal[3] * touch.raw_x + touch.cal[4] * touch.raw_y + touch.cal[5], UI_HEIGHT);
+		touch.point.x = clamp(touch.cal[0] * touch.raw_x + touch.cal[1] * touch.raw_y + touch.cal[2], WT_SCREEN_W);
+		touch.point.y = clamp(touch.cal[3] * touch.raw_x + touch.cal[4] * touch.raw_y + touch.cal[5], WT_SCREEN_H);
 	} else {	/* uncalibrated: plain scaling of the reported range */
-		touch.point.x = scale(touch.raw_x, touch.min_x, touch.max_x, UI_WIDTH);
-		touch.point.y = scale(touch.raw_y, touch.min_y, touch.max_y, UI_HEIGHT);
+		touch.point.x = scale(touch.raw_x, touch.min_x, touch.max_x, WT_SCREEN_W);
+		touch.point.y = scale(touch.raw_y, touch.min_y, touch.max_y, WT_SCREEN_H);
 	}
 	touch.pressed = touch.down;
 }
