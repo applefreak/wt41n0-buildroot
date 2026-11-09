@@ -32,6 +32,7 @@
 #include "apps.h"
 
 #define KEY_ESC		1
+#define KEY_POWER	116
 #define HOLD_MS		1500
 #define KILL_GRACE_MS	2000
 #define CONSOLE_VT	2
@@ -225,20 +226,28 @@ static bool alive(pid_t pid)
 	return r == 0;
 }
 
-/* Wait while the app runs; returns when it exits or Esc is held */
-static bool wait_app(pid_t pid)
+enum wait_result { WAIT_ENDED, WAIT_HOME, WAIT_POWER };
+
+/* Wait while the app runs; returns when it exits, Esc is held (home) or the power
+ * button is pressed (the Power app handles its own power button) */
+static enum wait_result wait_app(pid_t pid, const struct app *app)
 {
+	bool power_app = !strcmp(app->id, "power");
 	long esc_down = 0;
 	unsigned int code;
 	int value;
 
 	for (;;) {
 		if (!alive(pid))
-			return false;			/* the app ended */
-		if (ui_wait_key(100, &code, &value) && code == KEY_ESC)
-			esc_down = value ? (esc_down ? esc_down : now_ms()) : 0;
+			return WAIT_ENDED;
+		if (ui_wait_key(100, &code, &value)) {
+			if (code == KEY_ESC)
+				esc_down = value ? (esc_down ? esc_down : now_ms()) : 0;
+			else if (code == KEY_POWER && value == 1 && !power_app)
+				return WAIT_POWER;
+		}
 		if (esc_down && now_ms() - esc_down >= HOLD_MS)
-			return true;			/* home combination */
+			return WAIT_HOME;
 	}
 }
 
@@ -257,9 +266,11 @@ static void end_app(pid_t pid)
 	}
 }
 
-/* Returns -1 when the app could not be started (exec failed: exit code 127) */
+/* Returns -1 when the app could not be started (exec failed: exit code 127),
+ * APPS_POWER when the power button was pressed while it ran */
 int apps_launch(struct app *app)
 {
+	enum wait_result w = WAIT_ENDED;
 	int ret = 0;
 
 #ifdef WT41N0_UI_HOST
@@ -275,18 +286,18 @@ int apps_launch(struct app *app)
 			app->started = time(NULL);
 		}
 		if (ui_console_activate(CONSOLE_VT) == 0)
-			wait_app(app->pid);	/* the console app stays for next time */
+			w = wait_app(app->pid, app);	/* the console app stays for next time */
 		else
 			ret = -1;
 		ui_console_activate(1);
 	} else {
 		pid_t pid = start_lvgl(app->exec);
 
-		if (pid > 0 && wait_app(pid))
+		if (pid > 0 && (w = wait_app(pid, app)) != WAIT_ENDED)
 			end_app(pid);
 		else if (pid < 0 || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == 127))
 			ret = -1;
 	}
 	ui_resume();
-	return ret;
+	return w == WAIT_POWER ? APPS_POWER : ret;
 }

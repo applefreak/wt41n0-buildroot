@@ -150,7 +150,8 @@ static void style_pass(const char *st)
 
 	power_main();
 	host_advance(300);
-	host_key(KEY_DOWN);
+	shot("power");
+	keys(KEY_DOWN, 2);
 	host_key(KEY_ENTER);		/* arm POWER OFF */
 	host_advance(1200);
 	shot("power-armed");

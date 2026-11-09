@@ -16,6 +16,10 @@ enum { OFF, ONCE, LOCKED };
 
 static int gray, orange, blue;		/* OFF / ONCE / LOCKED */
 static void (*back_cb)(void);
+static void (*power_cb)(void);	/* the power button (KEY_POWER) */
+#ifndef KEY_POWER
+#define KEY_POWER 116		/* the host harness's key-code header lacks it */
+#endif
 static unsigned int back_code;		/* Esc press handled as "back": swallow its release */
 static bool shift_held;
 static lv_group_t *keys_group;
@@ -133,6 +137,11 @@ void keys_event(unsigned int code, int value)
 	int layer, sym;
 	uint32_t key;
 
+	if (code == KEY_POWER) {		/* not in the keymap: the app decides */
+		if (value == 1 && power_cb)
+			power_cb();
+		return;
+	}
 	for (i = 0; i < sizeof(ui_keymap) / sizeof(ui_keymap[0]); i++)
 		if (ui_keymap[i].code == code)
 			k = &ui_keymap[i];
@@ -204,6 +213,11 @@ void keys_event(unsigned int code, int value)
 		return;
 	pressed_as[code] = key;
 	push(key, LV_INDEV_STATE_PRESSED);
+}
+
+void ui_on_power(void (*cb)(void))
+{
+	power_cb = cb;
 }
 
 void keys_set_back(void (*cb)(void))

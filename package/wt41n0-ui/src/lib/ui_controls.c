@@ -358,6 +358,7 @@ struct big {
 	lv_timer_t *timer;
 	int left;			/* seconds */
 	const char *idle_hint;
+	bool needs_confirm;		/* arm first, act on the second ENT */
 };
 
 static void big_disarm(struct big *g)
@@ -421,6 +422,10 @@ static void big_event(lv_event_t *e)
 
 	switch (lv_event_get_code(e)) {
 	case LV_EVENT_CLICKED:
+		if (!g->needs_confirm) {
+			g->act(g->data);
+			break;
+		}
 		if (g->timer) {
 			big_disarm(g);
 			g->act(g->data);
@@ -449,11 +454,22 @@ static void big_event(lv_event_t *e)
 lv_obj_t *ui_big_button(lv_obj_t *content, int y, const char *icon, const char *name, const char *sub,
 			const char *key_label, const char *idle_hint, void (*act)(void *data), void *data)
 {
+	return ui_big_button_ex(content, y, WT_BTN_BIG_H, icon, name, sub, key_label, idle_hint, act, data, true);
+}
+
+/* h: the button's height (the label, sub-line and countdown spread over it);
+ * confirm false: ENT acts at once */
+lv_obj_t *ui_big_button_ex(lv_obj_t *content, int y, int h, const char *icon, const char *name,
+			   const char *sub, const char *key_label, const char *idle_hint,
+			   void (*act)(void *data), void *data, bool confirm)
+{
 	const ui_palette_t *p = ui_palette();
 	struct big *g = lv_malloc_zeroed(sizeof(*g));
-	lv_obj_t *b = ui_panel_kind(content, UI_PANEL_BUTTON, WT_INNER_X, CY(y), WT_INNER_W, WT_BTN_BIG_H, true), *i, *t;
-	int k;
+	lv_obj_t *b = ui_panel_kind(content, UI_PANEL_BUTTON, WT_INNER_X, CY(y), WT_INNER_W, h, true), *i, *t;
+	/* label and sub-line: centred in a 72 px button, near the top of shorter ones */
+	int k, name_y = h >= WT_BTN_BIG_H ? (h - 48) / 2 : 4, sub_y = name_y + (h >= WT_BTN_BIG_H ? 22 : 20);
 
+	g->needs_confirm = confirm;
 	g->btn = b;
 	g->act = act;
 	g->data = data;
@@ -466,15 +482,15 @@ lv_obj_t *ui_big_button(lv_obj_t *content, int y, const char *icon, const char *
 	if (ui_theme_style() != WT_STYLE_AERO)
 		ui_icon_color(i, p->text);
 	g->name = label(b, UI_ROLE_NAME, p->text, name);
-	lv_obj_set_pos(g->name, 64, 12);
+	lv_obj_set_pos(g->name, 64, name_y);
 	g->sub = label(b, UI_ROLE_DATA, p->dim, sub);
-	lv_obj_set_pos(g->sub, 64, 34);
+	lv_obj_set_pos(g->sub, 64, sub_y);
 	lv_obj_set_width(g->sub, WT_INNER_W - 64 - 60);
 	lv_label_set_long_mode(g->sub, LV_LABEL_LONG_WRAP);
 	t = label(b, UI_ROLE_DATA, p->dim, key_label);
 	lv_obj_align(t, LV_ALIGN_RIGHT_MID, -12, 0);
 	for (k = 0; k < SEGS; k++) {			/* 5-segment countdown */
-		g->seg[k] = rect(b, 64 + k * 25, 52, 22, 3, p->warn);
+		g->seg[k] = rect(b, 64 + k * 25, h - 20, 22, 3, p->warn);
 		lv_obj_add_flag(g->seg[k], LV_OBJ_FLAG_HIDDEN);
 	}
 	lv_obj_add_event_cb(b, big_event, LV_EVENT_ALL, g);

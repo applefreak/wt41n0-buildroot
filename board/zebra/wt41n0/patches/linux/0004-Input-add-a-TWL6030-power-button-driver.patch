@@ -11,8 +11,8 @@ Upstream: not submitted
 ---
  drivers/input/misc/Kconfig             |  5 ++
  drivers/input/misc/Makefile            |  1 +
- drivers/input/misc/twl6030-pwrbutton.c | 81 ++++++++++++++++++++++++++
- 3 files changed, 87 insertions(+)
+ drivers/input/misc/twl6030-pwrbutton.c | 102 ++++++++++++++++++++++++++
+ 3 files changed, 108 insertions(+)
  create mode 100644 drivers/input/misc/twl6030-pwrbutton.c
 
 diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
@@ -48,12 +48,16 @@ new file mode 100644
 index 000000000..efdc6062c
 --- /dev/null
 +++ b/drivers/input/misc/twl6030-pwrbutton.c
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,102 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * TWL6030 PWRON button as a KEY_POWER input device (written for the Zebra
-+ * WT41N0, where the power button goes to the PMIC's PWRON pin).
-+ * STS_HW_CONDITIONS (ID0 0x21) bit 1 = STS_PWRON, 0 while the button is held.
++ * TWL6030 power button as a KEY_POWER input device, written for the Zebra
++ * WT41N0, whose power button goes to the PMIC's RPWRON input (not PWRON:
++ * pressing it changes STS_HW_CONDITIONS bit 1 and raises INT_STS_A bit 1).
++ * STS_HW_CONDITIONS (ID0 0x21) bit 1 = STS_RPWRON, 0 while the button is held.
++ * The TWL6030 interrupt driver routes PWRON, RPWRON and BAT_VLOW to one child
++ * interrupt; this driver unmasks RPWRON in the PMIC (the interrupt driver
++ * masks every source at start) and reads the level on each event.
 + */
 +#include <linux/errno.h>
 +#include <linux/input.h>
@@ -62,9 +66,11 @@ index 000000000..efdc6062c
 +#include <linux/module.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
++#include <linux/pm_wakeup.h>
 +
 +#define TWL6030_STS_HW_CONDITIONS	0x21
-+#define STS_PWRON			BIT(1)
++#define STS_RPWRON			BIT(1)	/* in STS_HW_CONDITIONS */
++#define RPWRON_INT			BIT(1)	/* in INT_STS_A and its masks */
 +
 +static irqreturn_t twl6030_pwrbutton_irq(int irq, void *data)
 +{
@@ -72,12 +78,19 @@ index 000000000..efdc6062c
 +	u8 sts;
 +	int ret;
 +
++	/*
++	 * The TWL6030 interrupt runs as an ordinary nested interrupt during
++	 * suspend-to-idle, so nothing reports a wakeup for it: a press ends the
++	 * suspend here (before the I2C read, which can fail while suspended).
++	 */
++	pm_wakeup_hard_event(input->dev.parent);
++
 +	ret = twl_i2c_read_u8(TWL6030_MODULE_ID0, &sts, TWL6030_STS_HW_CONDITIONS);
 +	if (ret) {
 +		dev_err(input->dev.parent, "STS_HW_CONDITIONS read failed: %d\n", ret);
 +		return IRQ_HANDLED;
 +	}
-+	input_report_key(input, KEY_POWER, !(sts & STS_PWRON));
++	input_report_key(input, KEY_POWER, !(sts & STS_RPWRON));
 +	input_sync(input);
 +	return IRQ_HANDLED;
 +}
@@ -109,7 +122,15 @@ index 000000000..efdc6062c
 +	ret = input_register_device(input);
 +	if (ret)
 +		return ret;
++	ret = twl6030_interrupt_unmask(RPWRON_INT, REG_INT_MSK_LINE_A);
++	if (!ret)
++		ret = twl6030_interrupt_unmask(RPWRON_INT, REG_INT_MSK_STS_A);
++	if (ret)
++		return ret;
 +	device_init_wakeup(&pdev->dev, true);
++	/* Arm the wake at once: the TWL6030 interrupt driver arms its own line
++	 * at PM_SUSPEND_PREPARE only if a child wake IRQ is enabled by then. */
++	enable_irq_wake(irq);
 +	return 0;
 +}
 +

@@ -22,6 +22,7 @@ define WT41N0_UTILS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-update $(TARGET_DIR)/usr/sbin/wt41n0-update
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-install-root $(TARGET_DIR)/usr/sbin/wt41n0-install-root
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-growfs $(TARGET_DIR)/usr/sbin/wt41n0-growfs
+	$(INSTALL) -D -m 0755 $(@D)/wt41n0-suspend $(TARGET_DIR)/usr/sbin/wt41n0-suspend
 	$(INSTALL) -D -m 0755 $(@D)/wt41n0-scan $(TARGET_DIR)/usr/bin/wt41n0-scan
 	$(INSTALL) -D -m 0755 $(@D)/keys $(TARGET_DIR)/usr/bin/keys
 endef

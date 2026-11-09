@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Mon, 9 Nov 2026 03:10:00 +0000
+Subject: [PATCH] pwm: omap-dmtimer: stop a running timer for system suspend
+
+A running PWM keeps its dmtimer enabled across system suspend. ti-sysc
+switches the timer module off in the noirq phase, and the timer's CPU PM
+notifier then saves the context of a module without clocks on the way
+into low power: the read raises an L3 error ("MASTER MPU TARGET L4PER2
+(Read)") whose interrupt wakes the system at once. A pwm-backlight hits
+this every time, since it keeps its PWM enabled at 0 % duty when off.
+
+Stop the timer in the suspend phase (runtime PM, which the timer calls
+need, is off by the late phase) and start it again on resume;
+the timer driver saves and restores its registers with runtime PM.
+
+Upstream: not submitted
+---
+ drivers/pwm/pwm-omap-dmtimer.c | 41 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+--- a/drivers/pwm/pwm-omap-dmtimer.c
++++ b/drivers/pwm/pwm-omap-dmtimer.c
+@@ -62,6 +62,7 @@
+ 	struct omap_dm_timer *dm_timer;
+ 	const struct omap_dm_timer_ops *pdata;
+ 	struct platform_device *dm_timer_pdev;
++	bool resume_running;	/* stopped for system suspend, restart on resume */
+ };
+ 
+ static inline struct pwm_omap_dmtimer_chip *
+@@ -445,6 +446,45 @@
+ 	put_device(&omap->dm_timer_pdev->dev);
+ }
+ 
++/*
++ * A running PWM keeps its timer enabled across system suspend: ti-sysc then
++ * switches the timer module off in the noirq phase, and the timer's CPU PM
++ * notifier saves the context of a module without clocks on the way into
++ * low power. That read raises an L3 error whose interrupt wakes the system
++ * at once (seen with a pwm-backlight, which keeps its PWM enabled at 0 % duty
++ * when off). Stop the timer before that and start it again on resume; the
++ * timer driver saves and restores its registers with its runtime PM. This
++ * runs in the normal suspend phase, after the PWM's users (device links)
++ * and while runtime PM, which the timer calls need, still works.
++ */
++static int pwm_omap_dmtimer_suspend(struct device *dev)
++{
++	struct pwm_chip *chip = dev_get_drvdata(dev);
++	struct pwm_omap_dmtimer_chip *omap = to_pwm_omap_dmtimer_chip(chip);
++
++	omap->resume_running = pwm_omap_dmtimer_is_enabled(omap);
++	if (omap->resume_running)
++		omap->pdata->stop(omap->dm_timer);
++
++	return 0;
++}
++
++static int pwm_omap_dmtimer_resume(struct device *dev)
++{
++	struct pwm_chip *chip = dev_get_drvdata(dev);
++	struct pwm_omap_dmtimer_chip *omap = to_pwm_omap_dmtimer_chip(chip);
++
++	if (omap->resume_running)
++		pwm_omap_dmtimer_start(omap);
++	omap->resume_running = false;
++
++	return 0;
++}
++
++static const struct dev_pm_ops pwm_omap_dmtimer_pm_ops = {
++	SYSTEM_SLEEP_PM_OPS(pwm_omap_dmtimer_suspend, pwm_omap_dmtimer_resume)
++};
++
+ static const struct of_device_id pwm_omap_dmtimer_of_match[] = {
+ 	{.compatible = "ti,omap-dmtimer-pwm"},
+ 	{}
+@@ -455,6 +495,7 @@
+ 	.driver = {
+ 		.name = "omap-dmtimer-pwm",
+ 		.of_match_table = pwm_omap_dmtimer_of_match,
++		.pm = pm_sleep_ptr(&pwm_omap_dmtimer_pm_ops),
+ 	},
+ 	.probe = pwm_omap_dmtimer_probe,
+ 	.remove = pwm_omap_dmtimer_remove,
+-- 
+2.43.0

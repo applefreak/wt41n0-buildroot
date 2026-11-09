@@ -26,6 +26,7 @@ struct app {
 
 int apps_load(struct app *apps, int max);
 const char *apps_icon_symbol(const char *icon);	/* LV_SYMBOL_* or NULL for a file */
+#define APPS_POWER 1		/* apps_launch(): the power button was pressed in the app */
 int apps_launch(struct app *app);	/* -1: could not be started */
 
 #endif

@@ -23,7 +23,7 @@ GPIO numbers (bank = number / 32 + 1, line = number % 32).
 | Bluetooth | TI WL1283 on UART1 | `hci_ll` | classic (BR/EDR) working; no LE |
 | Accelerometer | NXP/Freescale MMA8452Q on I2C2 0x1C | `mma8452` | working |
 | USB | MUSB OTG, device mode | `musb-hdrc`, `g_serial` | working at full speed only |
-| Power button | TWL6030 PWRON | `twl6030-pwrbutton` | working (key events) |
+| Power button | TWL6030 RPWRON (not PWRON) | `twl6030-pwrbutton` | working (key events, wakes from suspend) |
 | Ring scanner | Zebra SSI on UART2, trigger on GPIO 2 | `wt41n0-scan` (user space) | working |
 
 ## Boot state
@@ -71,6 +71,31 @@ interrupt, 100 Wi-Fi enable, 103 Bluetooth enable, 104 audio codec power (`audpw
 - **Do not access I2C1 address 0x6C**: reading its register 2 hangs the unit. The chip is
   unidentified. Nothing answers at 0x6A, where the stock OS configuration lists a BQ24156
   charger.
+
+### Power button, suspend and power-off
+
+- The power button is on the TWL6030 **RPWRON** input, not PWRON: pressing it clears
+  STS_HW_CONDITIONS (0x48 0x21) bit 1 and raises INT_STS_A (0x49 0xD0) bit 1 (RPWRON); it
+  never raises PWRON (bit 0). The interrupt is masked until a driver unmasks it
+  (`twl6030_interrupt_unmask`); `twl6030-pwrbutton` does.
+- From power-off (TWL6030 DEVOFF, which `poweroff` does) the button does not start the
+  unit: RPWRON is not a start event on this PMIC's configuration. The cradle (start
+  condition 0x1F = 0x08) or a battery reinsertion (0x40) does.
+- Suspend: `wt41n0-suspend`, used by the Power app, puts the unit in suspend-to-idle; the
+  power button (and an RTC alarm) wakes it. The keypad would too, so its wakeup is
+  switched off for the suspend. The display keeps its bootloader setup across it. The
+  WL1283 loses its association, so its SDIO function is detached for the suspend and Wi-Fi
+  is started again after.
+- Mainline needed two fixes for a TWL6030 child to wake the system (patch 0013): the child
+  irq_chip copies `dummy_irq_chip` with IRQCHIP_SKIP_SET_WAKE, so wake requests never
+  armed the TWL6030 interrupt; and the PM notifier disabled that level-triggered line for
+  the suspend, so any interrupt in between masked it until resume.
+- Deep sleep (suspend to RAM) wakes again at once. Found so far: the backlight PWM keeps
+  timer9 running and the dmtimer CPU PM notifier then reads it with its module off (an L3
+  error whose interrupt wakes the CPU; patch 0011 stops it); and GPIO banks 2, 3, 4 and 6
+  fail to idle ("l4-per-clkctrl: failed to disable"), more with Wi-Fi and Bluetooth up.
+- The charger watchdog is fed by the battery driver, which cannot run while suspended:
+  a long suspend in the cradle stops charging until the unit wakes.
 
 ### CPU speed and voltage
 

@@ -5,6 +5,7 @@
  * current page, ENT opens the focused one.
  */
 #include <stdio.h>
+#include <string.h>
 #include "wt41n0ui.h"
 #include "apps.h"
 #include "readout.h"
@@ -91,11 +92,27 @@ static void rebuild(void *arg)
 	launcher_home_create();
 }
 
+/* the Power app (manifest Id=power), or -1 */
+static int power_app(void)
+{
+	int i;
+
+	for (i = 0; i < napps; i++)
+		if (!strcmp(apps[i].id, "power"))
+			return i;
+	return -1;
+}
+
 static void launch(void *arg)
 {
-	int i = (int)(intptr_t)arg;
+	int i = (int)(intptr_t)arg, r;
 
-	if (apps_launch(&apps[i]) == 0) {
+	r = apps_launch(&apps[i]);
+	/* the power button inside an app: the Power app next (it may end in suspend
+	 * and come back here, or be left with ESC) */
+	while (r == APPS_POWER && power_app() >= 0)
+		r = apps_launch(&apps[power_app()]);
+	if (r >= 0) {
 		lv_async_call(rebuild, NULL);
 	} else {
 		char buf[48];
@@ -104,6 +121,15 @@ static void launch(void *arg)
 		toast(buf);
 		ui_focus_ring_refresh();	/* the ring is still grown: back to the tile */
 	}
+}
+
+/* the power button on Home */
+static void power_pressed(void)
+{
+	int i = power_app();
+
+	if (i >= 0)
+		launch((void *)(intptr_t)i);
 }
 
 static void open_app(int i)
@@ -247,6 +273,7 @@ static void build_page(int new_page, int focus_on)
 	content = ui_screen(NULL);
 	lv_obj_add_event_cb(content, content_deleted, LV_EVENT_DELETE, NULL);
 	snprintf(marker, sizeof(marker), "%d/%d", page + 1, pages > 0 ? pages : 1);
+	ui_on_power(power_pressed);
 	ui_hint_keys("\xE2\x86\x91\xE2\x86\x93 SELECT|1-6 JUMP|ENT OPEN", marker);
 	lv_group_set_wrap(ui_group(), false);
 	lv_group_set_edge_cb(ui_group(), page_edge);

@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Mon, 9 Nov 2026 05:40:00 +0000
+Subject: [PATCH] mfd: twl6030-irq: make the TWL6030 interrupt a working wake
+ source
+
+Two problems kept a TWL6030 child (power button, RTC alarm) from waking
+the system, seen on the Zebra WT41N0:
+
+- The child irq_chip is a copy of dummy_irq_chip, which has
+  IRQCHIP_SKIP_SET_WAKE: the core never calls twl6030_irq_set_wake(), the
+  wake requests are not counted, and the PM notifier never arms the
+  TWL6030 interrupt. Clear the flag.
+
+- The PM notifier disables the interrupt for the suspend. The line is
+  level-triggered: an interrupt arriving while it is disabled (the GPADC
+  raises them regularly) masks it until resume. Keep it enabled when it is
+  a wake source; once the core suspends the interrupts, an armed line
+  wakes the system without running its handler, so the suspended I2C bus
+  is not touched. Disable it as before when nothing needs it.
+
+Upstream: not submitted
+---
+ drivers/mfd/twl6030-irq.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+--- a/drivers/mfd/twl6030-irq.c
++++ b/drivers/mfd/twl6030-irq.c
+@@ -108,6 +108,7 @@
+ 	int			twl_irq;
+ 	bool			irq_wake_enabled;
+ 	atomic_t		wakeirqs;
++	bool			irq_suspend_disabled;
+ 	struct notifier_block	pm_nb;
+ 	struct irq_chip		irq_chip;
+ 	struct irq_domain	*irq_domain;
+@@ -137,11 +138,22 @@
+ 			pdata->irq_wake_enabled = false;
+ 		}
+ 
+-		disable_irq(pdata->twl_irq);
++		/*
++		 * A wake source must stay enabled: the line is level-triggered, and
++		 * an interrupt arriving while it is disabled masks it until resume,
++		 * so it can no longer wake the system. Once the core suspends the
++		 * interrupts, an armed line wakes the system without running the
++		 * handler, so the suspended I2C bus is not touched.
++		 */
++		pdata->irq_suspend_disabled = !pdata->irq_wake_enabled;
++		if (pdata->irq_suspend_disabled)
++			disable_irq(pdata->twl_irq);
+ 		break;
+ 
+ 	case PM_POST_SUSPEND:
+-		enable_irq(pdata->twl_irq);
++		if (pdata->irq_suspend_disabled)
++			enable_irq(pdata->twl_irq);
++		pdata->irq_suspend_disabled = false;
+ 		break;
+ 
+ 	default:
+@@ -406,6 +418,10 @@
+ 	twl6030_irq->irq_chip.name = "twl6030";
+ 	twl6030_irq->irq_chip.irq_set_type = NULL;
+ 	twl6030_irq->irq_chip.irq_set_wake = twl6030_irq_set_wake;
++	/* dummy_irq_chip skips irq_set_wake: without this the children's wake
++	 * requests never reach twl6030_irq_set_wake, and the TWL6030 interrupt
++	 * is never armed for wake at suspend */
++	twl6030_irq->irq_chip.flags &= ~IRQCHIP_SKIP_SET_WAKE;
+ 
+ 	twl6030_irq->pm_nb.notifier_call = twl6030_irq_pm_notifier;
+ 	atomic_set(&twl6030_irq->wakeirqs, 0);
+-- 
+2.43.0

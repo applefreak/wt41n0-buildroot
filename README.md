@@ -26,7 +26,7 @@ file is needed to build it.
 | Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, System (device IDs, hardware and live sensor readings) and Power; four visual styles (CYBER, AERO, DECK, NUKE) |
 | Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC root file system that keeps every change (`support/install.py`) |
 
-Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, suspend.
+Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, deep sleep (suspend works as suspend-to-idle).
 
 ## What you need
 

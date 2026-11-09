@@ -135,6 +135,9 @@ bool ui_button_disabled(lv_obj_t *b);
 /* Big button (304 x 72 at y): the first ENT arms it ("CONFIRM <name>", warning, 5 s
  * countdown), a second ENT runs act(); ESC or the timeout disarms. idle_hint is the
  * screen's hint to restore. */
+lv_obj_t *ui_big_button_ex(lv_obj_t *content, int y, int h, const char *icon, const char *name,
+			   const char *sub, const char *key_label, const char *idle_hint,
+			   void (*act)(void *data), void *data, bool confirm);
 lv_obj_t *ui_big_button(lv_obj_t *content, int y, const char *icon, const char *name, const char *sub,
 			const char *key_label, const char *idle_hint, void (*act)(void *data), void *data);
 /* Status line at y 192: CONNECTING (accent), CONNECTED (second accent), warnings */
@@ -207,6 +210,7 @@ lv_group_t *ui_group(void);
 /* Esc outside an edited widget calls this (reset by ui_screen()); NULL ignores Esc.
  * Apps usually pass a function that goes back one screen or calls ui_quit(). */
 void ui_on_back(void (*cb)(void));
+void ui_on_power(void (*cb)(void));	/* the power button pressed (NULL: ignored) */
 
 /* For the launcher: hand the screen and the input devices to another program and
  * take them back. While suspended, LVGL does not run; ui_wait_key() reports raw key

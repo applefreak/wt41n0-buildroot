@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Poyu Chen <me@poyu.xyz>
+Date: Mon, 9 Nov 2026 05:20:00 +0000
+Subject: [PATCH] power: supply: wt41n0-battery: pause the update across system
+ suspend
+
+The periodic update reads the PMIC ADC and the External Agent over I2C. In
+suspend-to-idle it kept running every 20 s and failed, since I2C is
+suspended ("twl6030_gpadc: failed to start conversion"). Stop it for the
+suspend, and on resume run it at once with charging enabled again from
+scratch: the charger watchdog, which the update feeds, may have stopped
+charging meanwhile.
+
+Upstream: not submitted
+---
+ drivers/power/supply/wt41n0-battery.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+--- a/drivers/power/supply/wt41n0-battery.c
++++ b/drivers/power/supply/wt41n0-battery.c
+@@ -501,6 +501,33 @@
+ 	put_device(&b->ea->dev);
+ }
+ 
++/*
++ * Across a system suspend the update cannot run (I2C is suspended), and the
++ * charger watchdog runs out after a while, which stops charging. Pause the
++ * update, and on resume run it at once with charging re-enabled from scratch.
++ */
++static int wt41n0_battery_suspend(struct device *dev)
++{
++	struct wt41n0_battery *b = dev_get_drvdata(dev);
++
++	cancel_delayed_work_sync(&b->work);
++	return 0;
++}
++
++static int wt41n0_battery_resume(struct device *dev)
++{
++	struct wt41n0_battery *b = dev_get_drvdata(dev);
++
++	mutex_lock(&b->lock);
++	b->charging = false;	/* the watchdog may have stopped it: enable again */
++	mutex_unlock(&b->lock);
++	schedule_delayed_work(&b->work, 0);
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(wt41n0_battery_pm_ops, wt41n0_battery_suspend,
++				wt41n0_battery_resume);
++
+ static const struct of_device_id wt41n0_battery_of_match[] = {
+ 	{ .compatible = "zebra,wt41n0-battery" },
+ 	{ }
+@@ -513,6 +540,7 @@
+ 	.driver = {
+ 		.name = "wt41n0-battery",
+ 		.of_match_table = wt41n0_battery_of_match,
++		.pm = pm_sleep_ptr(&wt41n0_battery_pm_ops),
+ 	},
+ };
+ module_platform_driver(wt41n0_battery_driver);
+-- 
+2.43.0

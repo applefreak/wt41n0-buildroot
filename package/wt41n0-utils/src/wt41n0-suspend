@@ -1,0 +1,88 @@
+#!/bin/sh
+# wt41n0-suspend: sleep until the power button wakes the unit.
+#
+# Usage: wt41n0-suspend [-d] [-r SECONDS] [-v]
+#   -d          deep sleep (suspend to RAM) instead of suspend-to-idle; not
+#               working yet on this board: it wakes again at once (GPIO banks
+#               that do not idle, see docs/hardware.md)
+#   -r SECONDS  also wake after SECONDS (TWL6030 RTC alarm), for testing
+#   -v          print what happened: time asleep, the power domains that reached
+#               retention, and the interrupts that fired
+#
+# Only the power button (and the -r alarm) wakes it: the keypad and the touch
+# screen are wake sources too, but too easy to press by accident on the wrist,
+# so their wakeup is switched off for the suspend and back on after.
+#
+# Suspend-to-idle stops the apps, suspends the devices (backlight off) and idles
+# the CPU; the display keeps its bootloader setup and comes back as it was. The
+# WL1283 does not get its connection back after a suspend, so Wi-Fi is taken down
+# and its driver detached first, then brought back: it reconnects by itself a
+# few seconds after waking.
+set -u
+RTC=/sys/class/rtc/rtc0/wakealarm
+WIFI=mmc3:0001:2			# the WL1283's Wi-Fi function on SDIO
+SDIO=/sys/bus/sdio/drivers/wl1271_sdio
+alarm=0 verbose=0 state=freeze
+while getopts dr:v opt; do
+	case $opt in
+	d) state=mem ;;
+	r) alarm=$OPTARG ;;
+	v) verbose=1 ;;
+	*) echo "usage: $0 [-d] [-r SECONDS] [-v]" >&2; exit 2 ;;
+	esac
+done
+
+grep -qw $state /sys/power/state || { echo "wt41n0-suspend: no $state sleep" >&2; exit 1; }
+sync
+# keypad and touch screen: no wakeup while asleep (restored after)
+quiet=""
+for i in /sys/class/input/input*; do
+	case "$(cat $i/name 2>/dev/null)" in
+	*keypad*|*Touchscreen*) ;;
+	*) continue ;;
+	esac
+	w=$(readlink -f $i/device)/power/wakeup	# the keypad / touch controller
+	[ -f "$w" ] && [ "$(cat "$w")" = enabled ] || continue
+	echo disabled > "$w" && quiet="$quiet $w"
+done
+wifi=0
+if [ -e $SDIO/$WIFI ]; then
+	wifi=1
+	/etc/init.d/S40wifi stop > /dev/null 2>&1
+	echo $WIFI > $SDIO/unbind
+fi
+if [ "$alarm" -gt 0 ]; then
+	echo 0 > $RTC
+	echo "+$alarm" > $RTC
+fi
+
+if [ $verbose = 1 ]; then
+	mount | grep -q debugfs || mount -t debugfs none /sys/kernel/debug 2>/dev/null
+	cat /proc/interrupts > /tmp/.suspend-irq
+	grep -E '^(mpu|core|l4per|cpu0)_pwrdm' /sys/kernel/debug/pm_debug/count > /tmp/.suspend-pm 2>/dev/null
+fi
+start=$(date +%s)
+echo $state > /sys/power/state
+rc=$?
+end=$(date +%s)
+[ "$alarm" -gt 0 ] && echo 0 > $RTC
+for w in $quiet; do echo enabled > "$w"; done
+if [ $wifi = 1 ]; then
+	echo $WIFI > $SDIO/bind
+	# wlan0 appears once the chip's firmware has loaded; Wi-Fi cannot start before
+	( i=0
+	  while [ ! -e /sys/class/net/wlan0 ] && [ $i -lt 30 ]; do usleep 500000; i=$((i + 1)); done
+	  /etc/init.d/S40wifi start > /dev/null 2>&1 ) < /dev/null > /dev/null 2>&1 &
+fi
+
+if [ $verbose = 1 ]; then
+	echo "asleep $((end - start)) s (exit $rc)"
+	grep -E '^(mpu|core|l4per|cpu0)_pwrdm' /sys/kernel/debug/pm_debug/count |
+		awk 'NR==FNR { split($0, a, ","); old[$1] = a[3]; next }
+		     { split($0, a, ","); if (a[3] != old[$1]) print "  reached retention: " $1 }' /tmp/.suspend-pm -
+	awk 'NR==FNR { a[$1] = $2 + $3; next } ($1 in a) && ($2 + $3) != a[$1] && $1 !~ /IPI|twd/ {
+		printf "  irq %-6s +%d %s\n", $1, ($2 + $3) - a[$1], $NF }' /tmp/.suspend-irq /proc/interrupts
+	dmesg | tail -40 | grep -E "failed to disable|target state|L3 Custom|Wakeup|wakeup" | sed 's/^/  /'
+	rm -f /tmp/.suspend-irq /tmp/.suspend-pm
+fi
+exit $rc
