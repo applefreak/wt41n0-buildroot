@@ -17,7 +17,7 @@ add_custom_command(OUTPUT ${FONT_C}
 	DEPENDS fonts/ShareTechMono-Regular.ttf embed.cmake)
 
 set(LIB_SOURCES lib/ui_core.c lib/ui_frame.c lib/ui_keys.c lib/ui_theme.c lib/ui_conf.c lib/ui_calibrate.c
-	lib/ui_widgets.c lib/ui_entry.c lib/ui_style.c lib/ui_icons.c lib/ui_focus.c lib/ui_rows.c lib/ui_controls.c lib/ui_boot.c ${FONT_C})
+	lib/ui_widgets.c lib/ui_entry.c lib/ui_style.c lib/ui_icons.c lib/ui_focus.c lib/ui_rows.c lib/ui_controls.c lib/ui_boot.c lib/ui_keylight.c ${FONT_C})
 set(LAUNCHER_SOURCES launcher/home.c launcher/apps.c launcher/readout.c apps/settings/wpa.c)
 # each app: apps/<name>/*.c -> /usr/bin/wt41n0-<name>, plus its manifests apps/<name>/*.app
 set(APPS power settings scanner system)

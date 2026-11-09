@@ -30,6 +30,11 @@ void platform_resume(void);
 int platform_wait_key(int timeout_ms, unsigned int *code, int *value);
 int platform_vt_activate(int vt);
 
+/* Keypad backlight (ui_keylight.c): input activity and the auto-off check */
+void keylight_load(void);
+void keylight_activity(void);
+void keylight_tick(void);
+
 /* Benchmark counters (platform_linux.c), for WT41N0_UI_BENCH */
 struct bench_stats {
 	uint64_t flush_us, pixels, last_flush;

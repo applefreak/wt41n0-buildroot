@@ -1,8 +1,15 @@
 #!/bin/sh
-# Restore the brightness and volume chosen in the Settings app (/etc/wt41n0/ui.conf).
+# Restore the brightness, keypad light and volume chosen in the Settings app
+# (/etc/wt41n0/ui.conf).
 CONF=/etc/wt41n0/ui.conf
+KEYLIGHT=/sys/class/leds/keypad-backlight/brightness
 case "$1" in
 start)
+	# keypad light: lit at start (auto turns it off once the launcher runs), unless off
+	k=$(sed -n 's/^keylight=//p' $CONF 2>/dev/null)
+	m=$(sed -n 's/^keylight_mode=//p' $CONF 2>/dev/null)
+	[ "$m" = off ] && k=0
+	[ -f $KEYLIGHT ] && echo "${k:-50}" > $KEYLIGHT	# 50 % until chosen
 	[ -f $CONF ] || exit 0
 	b=$(sed -n 's/^brightness=//p' $CONF)
 	[ -n "$b" ] && echo "$b" > /sys/class/backlight/backlight/brightness 2>/dev/null

@@ -14,9 +14,10 @@ file is needed to build it.
 | | |
 |---|---|
 | Display, backlight | 320x240 LCD console, PWM brightness in `/sys/class/backlight` |
-| Keypad | all keys, with the orange / gray / blue layers on the text console (`keys` shows them) |
+| Keypad | all keys, with the orange / gray / blue layers on the text console (`keys` shows them); its backlight (`/sys/class/leds/keypad-backlight`) automatic, always on or off, set in Settings |
 | Touch screen | resistive panel as an input device (units without one are fine) |
-| LEDs, power button | the three body LEDs in `/sys/class/leds`; power button as a `KEY_POWER` event |
+| LEDs, power button | the three body LEDs in `/sys/class/leds`; the power button opens the Power app and wakes the unit from suspend (`KEY_POWER`) |
+| CPU, power | 300 to 800 MHz by load; suspend (suspend-to-idle, `wt41n0-suspend`), woken by the power button; power-off, after which the cradle or a battery reinsertion starts the unit again (the power button cannot) |
 | Wi-Fi | WL1283, WPA2, 2.4 and 5 GHz; ssh server |
 | Bluetooth | classic Bluetooth (BR/EDR): scan, discoverable, pairing with `bluetoothctl`; no Low Energy. Needs the chip's init script from your unit's Windows CE image (see `local/README.md`) |
 | USB | serial console over the USB / cradle cable (full speed) |
@@ -71,13 +72,16 @@ and it installs itself at its first boot (or use `support/install.py` over ssh; 
 `docs/customizing.md`). This replaces the Windows CE data partitions.
 
 **Updating a running unit.** Once the unit runs this system and is reachable over ssh,
-a new build can be installed without download mode:
+a new build can be installed without download mode. On a unit installed on the eMMC:
 
 ```sh
-support/update.py output/images/wt41n0-linux.hex --host root@<address>
+support/update.py output/images/wt41n0-emmc.hex --host root@<address>
 ```
 
-It writes the image to the same eMMC area download mode uses, verifies it and reboots.
+(`wt41n0-linux.hex` instead for a unit running from RAM; on an installed unit it would
+switch it back to the RAM system.) This updates the kernel and the boot image only; the
+eMMC root file system keeps its files and settings (see `docs/customizing.md`). It
+writes the image to the same eMMC area download mode uses, verifies it and reboots.
 If an image does not boot, download mode and `flash.py` still work as before.
 
 To return to Windows CE, flash Zebra's stock OS update for the WT41N0
@@ -86,7 +90,9 @@ before you start, so you always have a way back.
 
 ## Use
 
-The unit boots to a root shell on its LCD, driven by the keypad. Easier ways in:
+The unit boots to the launcher on its LCD, driven by the keypad (or the touch screen):
+app tiles, numbered 1 to 9. The Terminal app is a root shell; the power button opens
+the Power app (suspend, reboot, power off). Easier ways in:
 
 - **ssh**: `ssh root@<address>`. The address is shown on the LCD when Wi-Fi connects.
 - **USB serial**: the unit appears as a serial port on the host

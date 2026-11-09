@@ -316,10 +316,14 @@ static void read_input(int fd, int kind)
 	while ((n = read(fd, ev, sizeof(ev))) > 0) {
 		for (i = 0; i < n / (ssize_t)sizeof(ev[0]); i++) {
 			if (kind == DEV_KEYS) {
-				if (ev[i].type == EV_KEY)
+				if (ev[i].type == EV_KEY) {
+					keylight_activity();
 					keys_event(ev[i].code, ev[i].value);
+				}
 				continue;
 			}
+			if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH)
+				keylight_activity();
 			if (ev[i].type == EV_ABS && ev[i].code == ABS_X)
 				touch.raw_x = ev[i].value;
 			else if (ev[i].type == EV_ABS && ev[i].code == ABS_Y)
@@ -343,6 +347,7 @@ void platform_wait(uint32_t ms)
 	}
 	if (ms > 1000)
 		ms = 1000;
+	keylight_tick();
 	if (poll(pfd, ndevs, ms) <= 0)
 		return;
 	for (i = 0; i < ndevs; i++)
@@ -416,6 +421,8 @@ int platform_wait_key(int timeout_ms, unsigned int *code, int *value)
 		while (next < have) {
 			struct input_event *e = &ev[next++];
 
+			if (e->type == EV_KEY)		/* a key, or the touch screen pressed */
+				keylight_activity();
 			if (devs[from].kind == DEV_KEYS && e->type == EV_KEY) {
 				*code = e->code;
 				*value = e->value;
@@ -423,6 +430,7 @@ int platform_wait_key(int timeout_ms, unsigned int *code, int *value)
 			}
 		}
 		have = next = 0;
+		keylight_tick();
 		for (i = 0; i < ndevs; i++) {
 			pfd[i].fd = devs[i].fd;
 			pfd[i].events = POLLIN;

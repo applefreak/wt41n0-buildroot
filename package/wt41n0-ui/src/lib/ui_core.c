@@ -57,6 +57,7 @@ void ui_init(void)
 	lv_group_set_wrap(group, true);
 	keys_init(group);
 	focus_init(group);
+	ui_keylight_apply();
 	if (!getenv("WT41N0_UI_PERF"))
 		lv_sysmon_hide_performance(NULL);
 #ifndef WT41N0_UI_HOST
@@ -177,6 +178,7 @@ void ui_resume(void)
 	theme_init();
 	load_tz();
 	platform_resume();
+	keylight_load();
 	lv_obj_invalidate(lv_screen_active());
 	lv_refr_now(NULL);
 }

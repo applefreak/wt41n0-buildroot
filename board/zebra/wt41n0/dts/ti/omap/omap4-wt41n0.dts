@@ -105,6 +105,18 @@
 		default-brightness-level = <14>;	/* 66 % */
 	};
 
+	/* Keypad backlight: TWL6030 PWM1, as the stock KeyLightDrv drives it. Brightness
+	 * in percent (S30ui-settings sets the saved level); off while suspended. */
+	keypad-light {
+		compatible = "pwm-leds";
+
+		led-keypad {
+			label = "keypad-backlight";
+			pwms = <&twl_pwm 0 7812500>;
+			max-brightness = <100>;
+		};
+	};
+
 	/* Battery and charger: TWL6030 charger, External Agent, battery voltage on PMIC ADC input 3 */
 	battery {
 		compatible = "zebra,wt41n0-battery";

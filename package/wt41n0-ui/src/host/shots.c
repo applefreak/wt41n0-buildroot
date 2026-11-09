@@ -148,6 +148,14 @@ static void style_pass(const char *st)
 	settings("tz");
 	shot("timezone");
 
+	ui_conf_set("keylight_mode", "auto");
+	ui_keylight_apply();
+	settings("keylight");
+	shot("keylight");
+	host_key(KEY_ENTER);		/* MODE: AUTO -> ALWAYS ON */
+	host_advance(200);
+	shot("keylight-on");
+
 	power_main();
 	host_advance(300);
 	shot("power");

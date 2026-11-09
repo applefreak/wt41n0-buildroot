@@ -82,8 +82,10 @@ For proper regulatory limits add `country=XX` to `wifi.conf`.
 
 ## Console access
 
-`/etc/inittab` starts a root shell without login on the LCD (`tty1`) and on the USB
-serial port. To require a login, replace those lines with `getty` lines, for example:
+`/etc/inittab` starts the launcher on the LCD (`tty1`; without `BR2_WT41N0_LAUNCHER`, a
+root shell without login there) and a root shell without login on the USB serial port
+(`wt41n0-usb-console`). The launcher's Terminal app starts its own root shell on `tty2`.
+To require a login on a console, replace its line with a `getty` line, for example:
 
 ```
 tty1::respawn:/sbin/getty -L tty1 0 linux
@@ -98,8 +100,11 @@ Services are ordinary `/etc/init.d/S*` scripts:
 
 | Script | Does |
 |---|---|
+| `S01cpufreq` | sets the CPU voltage for 800 MHz, then lets the speed follow the load (300 to 800 MHz) |
+| `S05growfs` | on the eMMC system's first boot, grows the root file system to its partition |
 | `S10keymap` | loads the keypad console keymap |
 | `S20audio` | routes playback to the built-in speaker, sets the volume |
+| `S30ui-settings` | applies the launcher's saved brightness and volume (`/etc/wt41n0/ui.conf`) |
 | `S40wifi` | wpa_supplicant + DHCP on `wlan0`, in the background |
 | `S50dropbear` | ssh server (from the dropbear package) |
 

@@ -36,6 +36,24 @@ void sys_set_brightness(int value)
 	}
 }
 
+#define KEYLIGHT "/sys/class/leds/keypad-backlight/brightness"
+
+/* the keypad backlight, 0..100 (-1: none) */
+int sys_keylight(void)
+{
+	return read_int(KEYLIGHT);
+}
+
+void sys_set_keylight(int percent)
+{
+	FILE *f = fopen(KEYLIGHT, "w");
+
+	if (f) {
+		fprintf(f, "%d\n", percent);
+		fclose(f);
+	}
+}
+
 static snd_mixer_t *mixer;
 
 static snd_mixer_elem_t *elem(const char *name)
@@ -86,4 +104,7 @@ int sys_brightness(int *max) { *max = 17; return host_brightness; }
 void sys_set_brightness(int value) { host_brightness = value; }
 int sys_volume(void) { return host_volume; }
 void sys_set_volume(int percent) { host_volume = percent; }
+static int host_keylight = 50;
+int sys_keylight(void) { return host_keylight; }
+void sys_set_keylight(int percent) { host_keylight = percent; }
 #endif

@@ -13,6 +13,7 @@ GPIO numbers (bank = number / 32 + 1, line = number % 32).
 | Storage | 4 GB eMMC (Toshiba, `004G60`) on MMC2, 8-bit | `omap_hsmmc` | working (read; Symbol partition layout, see "Storage") |
 | Display | 240x320 RGB565 LCD, set up by the bootloader | `simple-framebuffer` + fbcon | working |
 | Backlight | timer 9 PWM | `pwm-backlight` | working |
+| Keypad backlight | TWL6030 PWM1 (as the stock `KeyLightDrv`) | `pwm-twl` + `pwm-leds` | working |
 | PMIC | TI TWL6030 on I2C1 0x48-0x4A | `twl-core`, `twl6030-regulator`, GPADC, RTC | working |
 | Audio codec | TI TWL6040 on I2C1 0x4B, McPDM | `omap-abe-twl6040` | speaker working; microphone partly |
 | Keypad | OMAP4 keypad controller, 8x8 matrix | `omap4-keypad` | working |

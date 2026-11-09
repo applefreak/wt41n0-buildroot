@@ -212,6 +212,14 @@ lv_group_t *ui_group(void);
 void ui_on_back(void (*cb)(void));
 void ui_on_power(void (*cb)(void));	/* the power button pressed (NULL: ignored) */
 
+/* Keypad backlight: mode, brightness and auto timeout live in ui.conf (keylight_mode=,
+ * keylight=, keylight_timeout=); ui_keylight_apply() reloads and applies them */
+enum ui_keylight_mode { UI_KEYLIGHT_AUTO, UI_KEYLIGHT_ON, UI_KEYLIGHT_OFF };
+void ui_keylight_apply(void);
+enum ui_keylight_mode ui_keylight_mode(void);
+int ui_keylight_level(void);
+int ui_keylight_timeout(void);		/* seconds */
+
 /* For the launcher: hand the screen and the input devices to another program and
  * take them back. While suspended, LVGL does not run; ui_wait_key() reports raw key
  * events (Linux codes) so the launcher can watch for its home combination. */

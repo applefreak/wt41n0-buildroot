@@ -9,7 +9,7 @@
 #include "settings.h"
 #include "wpa.h"
 
-enum { ROW_WIFI, ROW_DISPLAY, ROW_SOUND, ROW_THEME, ROW_INPUT, ROW_TZ, ROW_TOUCH };
+enum { ROW_WIFI, ROW_DISPLAY, ROW_KEYLIGHT, ROW_SOUND, ROW_THEME, ROW_INPUT, ROW_TZ, ROW_TOUCH };
 
 static lv_obj_t *list;
 
@@ -33,6 +33,7 @@ static void calibrated(bool saved);
 
 static void back_display(void) { settings_menu(ROW_DISPLAY); }
 static void back_sound(void) { settings_menu(ROW_SOUND); }
+static void back_keylight(void) { settings_menu(ROW_KEYLIGHT); }
 static int backlight_max;
 
 static void brightness_changed(int percent)
@@ -65,6 +66,93 @@ static void display_screen(void)
 	pct = (pct + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
 	lv_group_focus_obj(ui_slider_card(c, "display", "BRIGHTNESS", "%", WT_SLIDER_STEP, 100,
 					  pct < WT_SLIDER_STEP ? WT_SLIDER_STEP : pct, brightness_changed));
+}
+
+/* ---- keypad light: mode, auto timeout, brightness -------------------------------- */
+
+static const char *const keylight_modes[] = { "auto", "on", "off" };
+static const char *const keylight_mode_names[] = { "AUTO", "ALWAYS ON", "OFF" };
+static const int keylight_timeouts[] = { 5, 10, 30, 60 };
+#define NTIMEOUTS (int)(sizeof(keylight_timeouts) / sizeof(keylight_timeouts[0]))
+enum { KL_MODE, KL_TIMEOUT, KL_LEVEL };
+static lv_obj_t *kl_rows[3];
+
+static void keylight_screen(int focus);
+static void back_keylight_list(void) { keylight_screen(KL_LEVEL); }
+
+static void timeout_text(int s, char *buf, size_t len)
+{
+	if (s >= 60)
+		snprintf(buf, len, "%d MIN", s / 60);
+	else
+		snprintf(buf, len, "%d S", s);
+}
+
+static void keylight_values(void)
+{
+	char t[16];
+
+	lv_label_set_text(ui_row_value(kl_rows[KL_MODE]), keylight_mode_names[ui_keylight_mode()]);
+	timeout_text(ui_keylight_timeout(), t, sizeof(t));
+	ui_row_set_value(kl_rows[KL_TIMEOUT], ui_keylight_mode() == UI_KEYLIGHT_AUTO ? t : "--");
+	snprintf(t, sizeof(t), "%d%%", ui_keylight_level());
+	ui_row_set_value(kl_rows[KL_LEVEL], t);
+}
+
+static void keylight_level_changed(int v)
+{
+	char buf[8];
+
+	snprintf(buf, sizeof(buf), "%d", v);
+	ui_conf_set("keylight", buf);
+	ui_keylight_apply();		/* lights it at the new level to show it */
+}
+
+static void keylight_row_clicked(lv_event_t *e)
+{
+	int row = (int)(intptr_t)lv_event_get_user_data(e), i;
+	char buf[8];
+
+	switch (row) {
+	case KL_MODE:			/* AUTO -> ALWAYS ON -> OFF */
+		ui_conf_set("keylight_mode", keylight_modes[(ui_keylight_mode() + 1) % 3]);
+		break;
+	case KL_TIMEOUT:		/* 5 s -> 10 s -> 30 s -> 1 min */
+		for (i = 0; i < NTIMEOUTS && keylight_timeouts[i] != ui_keylight_timeout(); i++)
+			;
+		snprintf(buf, sizeof(buf), "%d", keylight_timeouts[(i + 1) % NTIMEOUTS]);
+		ui_conf_set("keylight_timeout", buf);
+		break;
+	default: {
+		lv_obj_t *c = ui_screen("KEYPAD/BRIGHTNESS");
+		int cur = (ui_keylight_level() + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
+
+		ui_on_back(back_keylight_list);
+		lv_group_focus_obj(ui_slider_card(c, "keyboard", "KEYPAD LIGHT", "%", WT_SLIDER_STEP, 100, cur,
+						  keylight_level_changed));
+		return;
+	}
+	}
+	ui_keylight_apply();
+	keylight_values();
+}
+
+/* the keypad light settings, as a list: ENT cycles MODE and TURN OFF AFTER */
+static void keylight_screen(int focus)
+{
+	lv_obj_t *c = ui_screen("SETTINGS/KEYPAD"), *list;
+	int i;
+
+	ui_hint_keys("\xE2\x86\x91\xE2\x86\x93 SELECT|ENT CHANGE|ESC BACK", "");
+	ui_on_back(back_keylight);
+	list = ui_rows_create(c, WT_INNER_Y, WT_INNER_H, false);
+	kl_rows[KL_MODE] = ui_row(list, "keyboard", "MODE", "");
+	kl_rows[KL_TIMEOUT] = ui_row(list, "clock", "TURN OFF AFTER", "");
+	kl_rows[KL_LEVEL] = ui_row(list, "display", "BRIGHTNESS", "");
+	for (i = 0; i < 3; i++)
+		lv_obj_add_event_cb(kl_rows[i], keylight_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+	keylight_values();
+	ui_rows_done(list, focus);
 }
 
 static void volume_changed(int v)
@@ -367,6 +455,7 @@ static void menu_clicked(lv_event_t *e)
 	switch ((int)(intptr_t)lv_event_get_user_data(e)) {
 	case ROW_WIFI: wifi_open(back_menu); break;
 	case ROW_DISPLAY: display_screen(); break;
+	case ROW_KEYLIGHT: keylight_screen(KL_MODE); break;
 	case ROW_SOUND: sound_screen(); break;
 	case ROW_THEME: theme_open(); break;
 	case ROW_TZ: tz_screen(); break;
@@ -390,7 +479,7 @@ void settings_menu(int focus)
 {
 	lv_obj_t *rows[ROW_TOUCH + 1] = { 0 }, *list, *content;
 	char mode[16] = "", text[48], ssid[64] = "", state[32] = "", ip[48] = "";
-	int z = current_zone(), max = 0, b = sys_brightness(&max), v = sys_volume(), i;
+	int z = current_zone(), max = 0, b = sys_brightness(&max), v = sys_volume(), k, i;
 
 	content = ui_screen("SETTINGS");
 	ui_hint_keys("\xE2\x86\x91\xE2\x86\x93 SELECT|ENT OPEN|ESC BACK", "");
@@ -403,6 +492,15 @@ void settings_menu(int focus)
 	rows[ROW_WIFI] = ui_row(list, "wifi", "WI-FI", ssid);
 	snprintf(text, sizeof(text), b >= 0 && max > 0 ? "%d%%" : "--", b * 100 / (max > 0 ? max : 1));
 	rows[ROW_DISPLAY] = ui_row(list, "display", "DISPLAY", text);
+	k = sys_keylight();
+	if (k >= 0) {
+		if (ui_keylight_mode() == UI_KEYLIGHT_OFF)
+			snprintf(text, sizeof(text), "OFF");
+		else
+			snprintf(text, sizeof(text), "%s %d%%", ui_keylight_mode() == UI_KEYLIGHT_AUTO ? "AUTO" : "ON",
+				 ui_keylight_level());
+		rows[ROW_KEYLIGHT] = ui_row(list, "keyboard", "KEYPAD LIGHT", text);
+	}
 	snprintf(text, sizeof(text), v >= 0 ? "%d%%" : "--", v);
 	rows[ROW_SOUND] = ui_row(list, "volume", "SOUND", text);
 	snprintf(text, sizeof(text), "%s / %s", ui_theme_palette(), ui_theme_accent());	/* resolved */
@@ -429,6 +527,8 @@ int main(int argc, char **argv)
 		wifi_open(quit);
 	else if (!strcmp(open, "display"))
 		display_screen();
+	else if (!strcmp(open, "keylight"))
+		keylight_screen(KL_MODE);
 	else if (!strcmp(open, "sound"))
 		sound_screen();
 	else if (!strcmp(open, "theme"))
