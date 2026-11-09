@@ -47,8 +47,11 @@ make
 
 The result is `output/images/wt41n0-linux.hex`.
 
-Optional, before building: put a `wifi.conf` and your ssh `authorized_keys` in
-`local/` (see `local/README.md`). Nothing in `local/` is tracked by git.
+The image carries no Wi-Fi network and no ssh key: networks are added on the unit in
+Settings, and ssh uses the root password (see Use). For your own development images,
+`local/` can hold a `wifi.conf`, your `authorized_keys` and a fixed host key, built in
+with `BR2_WT41N0_LOCAL_WIFI` and `BR2_WT41N0_LOCAL_SSH` (see `local/README.md`).
+Nothing in `local/` is tracked by git.
 
 ## Flash
 
@@ -105,10 +108,11 @@ Everything is ordinary Buildroot: `make menuconfig` for packages,
   LCD debug console from its first instruction).
 - **The `local/` directory** for your private files.
 
-Defaults are developer-friendly: the consoles are root shells without a login, ssh
-accepts keys, and password logins work only once you set a root password
-(`BR2_TARGET_GENERIC_ROOT_PASSWD`). Tighten this before using a unit anywhere you do
-not control.
+ssh logs in as root with the password **`wt41n0`**; the first login asks for a new one
+and ends the session if it is not changed. The consoles (the Terminal app and USB) are
+root shells without a login. Your own ssh key and a fixed host key can be built in
+instead (`BR2_WT41N0_LOCAL_SSH`, see `docs/customizing.md`). Tighten the consoles too
+before using a unit anywhere you do not control.
 
 ## Layout
 

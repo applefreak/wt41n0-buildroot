@@ -7,9 +7,49 @@ config BR2_WT41N0_LOCAL_DIR
 	  Optional files that are copied into the image when present.
 	  The directory is ignored by git, so nothing in it is shared.
 
-	    wifi.conf                   wpa_supplicant configuration
-	    authorized_keys             ssh public keys for root
-	    dropbear_ed25519_host_key   fixed ssh host key
+	    wifi.conf                   wpa_supplicant configuration, only
+	                                with BR2_WT41N0_LOCAL_WIFI
+	    authorized_keys             ssh public keys for root, and
+	    dropbear_ed25519_host_key   a fixed ssh host key, both only
+	                                with BR2_WT41N0_LOCAL_SSH
+
+config BR2_WT41N0_LOCAL_WIFI
+	bool "build local/wifi.conf into the image"
+	help
+	  Install wifi.conf from the local directory as
+	  /etc/wpa_supplicant.conf, so the unit joins your network at its
+	  first boot without any setup on the unit.
+
+	  Off by default: the image then carries no Wi-Fi networks and no
+	  passphrase, and networks are added on the unit with Settings,
+	  Wi-Fi (they are saved on the eMMC root). Turn it on for your own
+	  development images; leave it off for images you hand to others.
+
+config BR2_WT41N0_LOCAL_SSH
+	bool "build local/ ssh keys into the image"
+	help
+	  Install authorized_keys from the local directory as
+	  /root/.ssh/authorized_keys and dropbear_ed25519_host_key as the
+	  ssh host key, so your key logs in at once and every unit flashed
+	  with the image has the same ssh identity.
+
+	  Off by default: root logs in over ssh with the root password
+	  (BR2_TARGET_GENERIC_ROOT_PASSWD), and each unit makes its own host
+	  key at its first start (kept on the eMMC root). Turn it on for
+	  your own development images.
+
+config BR2_WT41N0_ROOT_PASSWD_EXPIRED
+	bool "ask for a new root password at the first ssh login"
+	default y
+	help
+	  Mark root's password as expired in /etc/shadow (last change 0),
+	  so the first interactive ssh login must choose a new one before
+	  it gets a shell; if it does not, the session ends. Use it when
+	  the image carries a default password (wt41n0 in the defconfig).
+
+	  Only ssh logins are asked: the consoles (LCD terminal, USB) are
+	  root shells without a login. Commands run over ssh without a
+	  terminal are not stopped.
 
 config BR2_WT41N0_RNG_SEED
 	bool "random seed in the device tree"
@@ -25,8 +65,8 @@ config BR2_WT41N0_RNG_SEED
 
 	  Every boot of one image starts from the same seed, mixed with
 	  timing entropy gathered while it runs. Treat the image file
-	  as secret anyway: it also holds the Wi-Fi passphrase and the
-	  ssh host key from local/.
+	  as secret anyway: it also holds the ssh host key from local/
+	  (and the Wi-Fi passphrase with BR2_WT41N0_LOCAL_WIFI).
 
 choice
 	prompt "boot verbosity"

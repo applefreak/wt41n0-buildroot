@@ -32,32 +32,52 @@ python3 "$EXT/support/keymap.py" --bmap > "$TARGET/etc/wt41n0.bmap"
 # Private files from the local directory, when present
 LOCAL=$(cfg_str BR2_WT41N0_LOCAL_DIR)
 
-# Wi-Fi: only with the user's own configuration. The wpa_supplicant package
-# ships a sample file that would join any open network; never keep that one.
-# Without one, a configuration with no networks: the Settings app adds them
-# (update_config=1 lets wpa_supplicant save them).
+# Wi-Fi: by default a configuration with no networks; the Settings app adds them
+# on the unit (update_config=1 lets wpa_supplicant save them). local/wifi.conf only
+# goes in with BR2_WT41N0_LOCAL_WIFI. The wpa_supplicant package ships a sample
+# file that would join any open network; never keep that one.
 rm -f "$TARGET/etc/wpa_supplicant.conf"
-if [ -s "$LOCAL/wifi.conf" ]; then
+if cfg_bool BR2_WT41N0_LOCAL_WIFI && [ -s "$LOCAL/wifi.conf" ]; then
 	install -m 0600 "$LOCAL/wifi.conf" "$TARGET/etc/wpa_supplicant.conf"
 else
+	cfg_bool BR2_WT41N0_LOCAL_WIFI &&
+		echo "post-build: BR2_WT41N0_LOCAL_WIFI is set but $LOCAL/wifi.conf is missing; no networks" >&2
+	[ -s "$LOCAL/wifi.conf" ] && ! cfg_bool BR2_WT41N0_LOCAL_WIFI &&
+		echo "post-build: not using $LOCAL/wifi.conf (BR2_WT41N0_LOCAL_WIFI is off)" >&2
 	printf 'ctrl_interface=/var/run/wpa_supplicant\n' > "$TARGET/etc/wpa_supplicant.conf"
 	chmod 0600 "$TARGET/etc/wpa_supplicant.conf"
 fi
 grep -q '^update_config=' "$TARGET/etc/wpa_supplicant.conf" ||
 	sed -i '1a update_config=1' "$TARGET/etc/wpa_supplicant.conf"
 
-# ssh: root logs in with a key; password logins work only if a root password
-# is set (BR2_TARGET_GENERIC_ROOT_PASSWD), since dropbear refuses empty ones.
-if [ -s "$LOCAL/authorized_keys" ]; then
-	install -d -m 0700 "$TARGET/root/.ssh"
-	install -m 0600 "$LOCAL/authorized_keys" "$TARGET/root/.ssh/authorized_keys"
-fi
-# A fixed host key keeps the unit's ssh identity across boots; without one
-# dropbear generates a new key at every boot (the system runs from RAM).
+# ssh: by default root logs in with the root password (BR2_TARGET_GENERIC_ROOT_PASSWD;
+# dropbear refuses empty ones), and dropbear makes the unit's own host key at its
+# first start (kept on the eMMC root; from RAM, a new one each boot). The keys in
+# local/ go in only with BR2_WT41N0_LOCAL_SSH.
+rm -rf "$TARGET/root/.ssh"
 rm -f "$TARGET/etc/dropbear_ed25519_host_key" "$TARGET/etc/default/dropbear"
-if [ -s "$LOCAL/dropbear_ed25519_host_key" ]; then
-	install -m 0600 "$LOCAL/dropbear_ed25519_host_key" "$TARGET/etc/dropbear_ed25519_host_key"
-	echo 'DROPBEAR_ARGS="-r /etc/dropbear_ed25519_host_key"' > "$TARGET/etc/default/dropbear"
+if cfg_bool BR2_WT41N0_LOCAL_SSH; then
+	if [ -s "$LOCAL/authorized_keys" ]; then
+		install -d -m 0700 "$TARGET/root/.ssh"
+		install -m 0600 "$LOCAL/authorized_keys" "$TARGET/root/.ssh/authorized_keys"
+	fi
+	# A fixed host key: the same ssh identity on every unit and at every boot
+	if [ -s "$LOCAL/dropbear_ed25519_host_key" ]; then
+		install -m 0600 "$LOCAL/dropbear_ed25519_host_key" "$TARGET/etc/dropbear_ed25519_host_key"
+		echo 'DROPBEAR_ARGS="-r /etc/dropbear_ed25519_host_key"' > "$TARGET/etc/default/dropbear"
+	fi
+elif [ -s "$LOCAL/authorized_keys" ] || [ -s "$LOCAL/dropbear_ed25519_host_key" ]; then
+	echo "post-build: not using the ssh keys in $LOCAL (BR2_WT41N0_LOCAL_SSH is off)" >&2
+fi
+
+# A default root password is marked expired (last change = day 0): the first ssh
+# login has to choose a new one (/etc/profile.d/root-password.sh). Buildroot has
+# set the password by now (its finalize step runs before this script).
+if cfg_bool BR2_WT41N0_ROOT_PASSWD_EXPIRED && grep -q '^root:[^:!*][^:]*:' "$TARGET/etc/shadow"; then
+	sed -i 's/^\(root:[^:]*\):[^:]*:/\1:0:/' "$TARGET/etc/shadow"
+fi
+if ! grep -q '^root:[^:!*][^:]*:' "$TARGET/etc/shadow" && [ ! -s "$TARGET/root/.ssh/authorized_keys" ]; then
+	echo "post-build: no root password and no ssh key: nobody can log in over ssh" >&2
 fi
 
 # Firmware. The linux-firmware package installs every WL128x variant; the driver

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Wi-Fi on wlan0 with wpa_supplicant and DHCP, and the clock from NTP. Networks come
-# from /etc/wpa_supplicant.conf (the BSP's local/wifi.conf, or added with the
-# Settings app); the build installs one without networks when there is no local one.
+# from /etc/wpa_supplicant.conf, added with the Settings app (or the BSP's
+# local/wifi.conf, built in with BR2_WT41N0_LOCAL_WIFI); by default the build
+# installs one without networks.
 #
 # A small supervisor runs in the background, so the boot does not wait for the
 # network: it starts wpa_supplicant (and restarts it if it ever exits), runs the

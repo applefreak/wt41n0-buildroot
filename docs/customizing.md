@@ -57,16 +57,26 @@ The recovery system is the RAM system, with Wi-Fi, ssh and the installer.
 
 ## Wi-Fi and ssh
 
-Put these in `local/` and rebuild (`make` is enough):
+By default the image has neither: Wi-Fi networks are added on the unit (Settings,
+Wi-Fi) and ssh logs in as root with the password `wt41n0` (`BR2_TARGET_GENERIC_ROOT_PASSWD`
+in the defconfig), which the first ssh login must change
+(`BR2_WT41N0_ROOT_PASSWD_EXPIRED`; the session ends otherwise). Each unit makes its own
+ssh host key at its first start.
 
-- `wifi.conf`: a `wpa_supplicant.conf`. Installed as `/etc/wpa_supplicant.conf`.
-  Without it Wi-Fi stays off.
-- `authorized_keys`: public keys for root.
-- `dropbear_ed25519_host_key`: a fixed host key. The system runs from RAM, so without
-  one the unit gets a new ssh identity at every boot.
+For your own development images, put these in `local/`, turn on the options (External
+options in `make menuconfig`) and rebuild (`make` is enough):
 
-Password logins over ssh work only when root has a password: set
-`BR2_TARGET_GENERIC_ROOT_PASSWD` (System configuration, Root password).
+- `wifi.conf`: a `wpa_supplicant.conf`, installed as `/etc/wpa_supplicant.conf` only
+  when `BR2_WT41N0_LOCAL_WIFI` is on (External options, "build local/wifi.conf into
+  the image"). It is off by default: the image then has no networks, and you add them
+  on the unit in Settings, Wi-Fi, where they are saved.
+- `authorized_keys`: public keys for root (with `BR2_WT41N0_LOCAL_SSH`).
+- `dropbear_ed25519_host_key`: a fixed host key (with `BR2_WT41N0_LOCAL_SSH`). Without
+  one each unit makes its own; a system running from RAM gets a new one at every boot.
+
+To build without a root password, clear `BR2_TARGET_GENERIC_ROOT_PASSWD` (System
+configuration, Root password); ssh then accepts only keys, since dropbear refuses empty
+passwords.
 
 For proper regulatory limits add `country=XX` to `wifi.conf`.
 
