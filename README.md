@@ -21,9 +21,10 @@ alone, so flashing the stock OS image again restores the unit.
 | Bluetooth | classic Bluetooth (BR/EDR): scan, discoverable, pairing with `bluetoothctl`; no Low Energy. Needs the chip's init script from your unit's Windows CE image (see `local/README.md`) |
 | USB | serial console over the cradle's USB connection (full speed) |
 | Audio | built-in speaker through ALSA (`aplay file.wav`); built-in microphone records, but at the wrong rate for now |
+| Music | MPD plays a library in `/root/Music` (MP3, FLAC, Ogg Vorbis, Opus) and internet radio; the Music app controls it, `mpc` over SSH too |
 | Battery, charging | battery voltage, capacity, current and temperature in `/sys/class/power_supply`; charges in the cradle, with the middle LED blinking orange |
 | Ring scanner | barcodes from the ring scanner with its trigger (`wt41n0-scan`); the accessory ports also work as a plain serial port (`wt41n0-fpga serial on`, `/dev/ttyS1`) |
-| Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, System (device IDs, hardware and live sensor readings) and Power; four visual styles to choose from |
+| Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, Music, System (device IDs, hardware and live sensor readings) and Power; four visual styles to choose from |
 | Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC root file system that keeps every change (`support/install.py`) |
 
 Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, deep sleep (suspend works as suspend-to-idle).

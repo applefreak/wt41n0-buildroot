@@ -1,6 +1,7 @@
 /*
  * Settings: Wi-Fi, display, sound, theme, text input, time zone and touch.
- * Started with "wifi" as its argument it opens on the Wi-Fi screen (the WI-FI tile).
+ * Started with "wifi" as its argument it opens on the Wi-Fi screen (for a manifest that
+ * wants a Wi-Fi tile; the home screen has none by default).
  */
 #include <stdio.h>
 #include <stdlib.h>

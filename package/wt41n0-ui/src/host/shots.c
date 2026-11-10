@@ -13,6 +13,7 @@
 
 int power_main(void);
 int scanner_main(void);
+int music_main(void);
 int system_main(int argc, char **argv);
 int settings_main(int argc, char **argv);
 
@@ -164,6 +165,39 @@ static void style_pass(const char *st)
 	host_advance(1200);
 	shot("power-armed");
 	host_key(KEY_ESC);
+
+	/* music: canned MPD state (apps/music/mpdc.c) */
+	music_main();
+	host_advance(300);
+	shot("music");
+	host_key(KEY_1 + 2);		/* 3: RADIO */
+	host_advance(300);
+	shot("music-radio");
+	host_key(KEY_ESC);
+	host_advance(300);
+	host_key(KEY_1 + 1);		/* 2: LIBRARY */
+	host_advance(300);
+	shot("music-library");
+	keys(KEY_DOWN, 2);
+	host_key(KEY_ENTER);		/* ALBUMS */
+	host_advance(300);
+	host_key(KEY_DOWN);
+	host_key(KEY_ENTER);		/* LOW TIDE */
+	host_advance(300);
+	shot("music-album");
+	keys(KEY_ESC, 3);
+	host_advance(300);
+	host_key(KEY_1);		/* 1: QUEUE */
+	host_advance(300);
+	shot("music-queue");
+	keys(KEY_DOWN, 4);		/* row 6: an online song without tags */
+	host_advance(300);
+	shot("music-queue-online");
+	keys(KEY_UP, 8);		/* wraps to the end: rows 57-60 */
+	host_advance(300);
+	shot("music-queue-end");
+	keys(KEY_ESC, 2);
+	host_advance(300);
 
 	/* scanner: the fake reader answers and reads three codes */
 	unlink(getenv("WT41N0_SCANS"));

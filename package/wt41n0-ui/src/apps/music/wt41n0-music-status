@@ -1,0 +1,21 @@
+#!/bin/sh
+# The Music tile's readout on the home screen ("meta|line|level", see launcher/apps.c):
+# the state, the song, and the progress as 0-8.
+S=/run/mpd.socket
+out=$(mpc -h "$S" -f '[[%artist% - ]%title%]|[%name%]|[%file%]' 2> /dev/null) || {
+	echo "OFF|NO MUSIC SERVER|-1"
+	exit 0
+}
+case "$out" in
+*"[playing]"*|*"[paused]"*)
+	song=$(echo "$out" | sed -n 1p | tr -d '|')
+	info=$(echo "$out" | sed -n 2p)
+	state=PLAY
+	case "$info" in *"[paused]"*) state=PAUSE ;; esac
+	pct=$(echo "$info" | sed -n 's/.*(\([0-9]*\)%).*/\1/p')
+	echo "$state|$song|$(( ${pct:-0} * 8 / 100 ))"
+	;;
+*)
+	echo "STOP|NOTHING PLAYING|-1"
+	;;
+esac

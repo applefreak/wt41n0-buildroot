@@ -13,6 +13,8 @@
 # screen are wake sources too, but too easy to press by accident on the wrist,
 # so their wakeup is switched off for the suspend and back on after.
 #
+# MPD's playback is paused first (and stays paused after waking).
+#
 # Suspend-to-idle stops the apps, suspends the devices (backlight off) and idles
 # the CPU; the display keeps its bootloader setup and comes back as it was. The
 # WL1283 does not get its connection back after a suspend, so Wi-Fi is taken down
@@ -45,6 +47,8 @@ for i in /sys/class/input/input*; do
 	[ -f "$w" ] && [ "$(cat "$w")" = enabled ] || continue
 	echo disabled > "$w" && quiet="$quiet $w"
 done
+# music: pause it (it stays paused after waking, like a phone)
+command -v mpc > /dev/null && mpc -h /run/mpd.socket -q pause 2> /dev/null
 wifi=0
 if [ -e $SDIO/$WIFI ]; then
 	wifi=1

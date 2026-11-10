@@ -106,6 +106,7 @@ Services are ordinary `/etc/init.d/S*` scripts:
 | `S30ui-settings` | applies the launcher's saved brightness and volume (`/etc/wt41n0/ui.conf`) |
 | `S40wifi` | wpa_supplicant + DHCP on `wlan0`, in the background |
 | `S50dropbear` | ssh server (from the dropbear package) |
+| `S95mpd` | the MPD music server (from the mpd package; `/etc/mpd.conf`) |
 
 `/etc/default/wt41n0` holds the speaker volume, whether the address is printed on the
 LCD when Wi-Fi connects, and which kernel messages still reach the LCD after start-up.
@@ -140,6 +141,28 @@ format to what the hardware accepts and routes stereo to the built-in speaker
 (`default`); `-D headset` selects the headset outputs, which are untested. The speaker volume is the mixer control
 "Handsfree Playback Volume" (0 to 29). `pcmtest` plays a test tone without the ALSA
 library.
+
+## Music
+
+MPD (`/etc/mpd.conf`) plays to the speaker through ALSA's `default` device. Its volume
+is the same "Handsfree" control Settings changes. It listens only on its Unix socket
+(`/run/mpd.socket`), not on the network. The Music app is its client; `mpc -h
+/run/mpd.socket` works too, over SSH.
+
+- **Your music:** copy it into `/root/Music`, for example
+  `scp -r Album root@<address>:/root/Music/`. MPD notices new files by itself (or
+  choose UPDATE in the app's Library). On the RAM system the files are gone after a
+  reboot; on an eMMC install they stay.
+- **Radio:** add a station's stream URL in the app (Radio, ADD STATION). Stations live in
+  the playlist `/root/Music/Playlists/Radio.m3u`, one URL per line; edit it to remove
+  one. Other `.m3u` playlists in that folder show up under Radio as well.
+- **Online playlists:** a URL ending in `.m3u`, `.pls` or `.xspf` is loaded as a playlist
+  rather than played as a stream. Internet Archive audio items have one: open the item's
+  download page (`https://archive.org/download/<item>/`) and use its `<item>_64kb.m3u`
+  or `_vbr.m3u` link, then add it under Radio.
+- **Formats:** MP3, FLAC, Ogg Vorbis, Opus, and HTTP/HTTPS streams. More are MPD options
+  in menuconfig (Target packages, Audio and video applications, mpd).
+- MPD pauses when the unit suspends and stays paused after it wakes.
 
 ## LEDs and backlight
 

@@ -13,15 +13,16 @@
 #include "ui_internal.h"
 
 #define CY(y) ((y) - WT_CONTENT_Y)
-#define MAX_ROWS 40
+#define MAX_ROWS 160
+#define MAX_TICKS 40	/* indicator ticks; past 40 rows each tick stands for several */
 
 struct list {
 	bool done;		/* ui_rows_done() ran: rows fit themselves as they change */
 	lv_obj_t *col;			/* the scrolling column */
 	lv_obj_t *ind;			/* the indicator column */
-	lv_obj_t *ticks[MAX_ROWS];
+	lv_obj_t *ticks[MAX_TICKS];
 	lv_obj_t *rows[MAX_ROWS];
-	int n;
+	int n, nt;		/* rows, ticks */
 	bool compact;
 	const char *marker;	/* fixed hint marker, or NULL: "01/07" */
 };
@@ -88,8 +89,10 @@ static void indicator(struct list *l, int focused)
 	const ui_palette_t *p = ui_palette();
 	int i;
 
-	for (i = 0; i < l->n; i++) {
-		bool f = i == focused;
+	int tick = focused >= 0 && l->n ? focused * l->nt / l->n : -1;
+
+	for (i = 0; i < l->nt; i++) {
+		bool f = i == tick;
 
 		lv_obj_set_style_bg_color(l->ticks[i], f ? p->accent : p->line, 0);
 		lv_obj_set_width(l->ticks[i], f ? 3 : 1);
@@ -214,7 +217,7 @@ lv_obj_t *ui_row_ex(lv_obj_t *list, const char *icon, const char *name, const ch
 		snprintf(num, sizeof(num), "%02d", l->n + 1);
 		r->number = ui_number(row, num);
 		if (ui_theme_style() == WT_STYLE_CYBER)
-			lv_obj_set_width(r->number, 14);
+			lv_obj_set_width(r->number, l->n + 1 >= 100 ? 21 : 14);
 	}
 	if (icon && *icon)
 		r->icon = ui_icon_sized(row, icon, 18);
@@ -301,10 +304,12 @@ void ui_rows_marker(lv_obj_t *list, const char *marker)
 void ui_rows_done(lv_obj_t *list, int focus)
 {
 	struct list *l = lv_obj_get_user_data(list);
-	int h = lv_obj_get_height(l->ind), gap = l->n > 20 ? 1 : 2, i, y = 0;
+	int h = lv_obj_get_height(l->ind), i, y = 0, gap;
 
-	for (i = 0; i < l->n; i++) {
-		int th = (h - (l->n - 1) * gap) * (i + 1) / l->n - (h - (l->n - 1) * gap) * i / l->n;
+	l->nt = l->n < MAX_TICKS ? l->n : MAX_TICKS;
+	gap = l->nt > 20 ? 1 : 2;
+	for (i = 0; i < l->nt; i++) {
+		int th = (h - (l->nt - 1) * gap) * (i + 1) / l->nt - (h - (l->nt - 1) * gap) * i / l->nt;
 
 		l->ticks[i] = lv_obj_create(l->ind);
 		lv_obj_remove_style_all(l->ticks[i]);

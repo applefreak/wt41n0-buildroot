@@ -104,7 +104,8 @@ void ui_hint_marker(const char *marker);	/* change the marker */
 /* Lists of rows (SPEC.md): ui_rows_create() makes the scrolling column at absolute y,
  * h px tall (rows: WT_INNER_Y, WT_INNER_H; compact rows under a card: y 70), then
  * ui_row() per item (icon name: see ui_icon), then ui_rows_done() with the row to focus.
- * React to a row with LV_EVENT_CLICKED; rows carry numbers 01, 02, ... */
+ * React to a row with LV_EVENT_CLICKED; rows carry numbers 01, 02, ... A list holds up
+ * to 160 rows: past that ui_row()/ui_row_ex() return NULL. */
 lv_obj_t *ui_rows_create(lv_obj_t *content, int y, int h, bool compact);
 #define UI_ROW_NO_NUMBER	1
 #define UI_ROW_NO_CHEVRON	2

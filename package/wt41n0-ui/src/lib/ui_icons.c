@@ -21,7 +21,10 @@ static const struct { const char *name, *symbol; } symbols[] = {
 	{ "download", LV_SYMBOL_DOWNLOAD }, { "upload", LV_SYMBOL_UPLOAD }, { "warning", LV_SYMBOL_WARNING },
 	{ "ok", LV_SYMBOL_OK }, { "trash", LV_SYMBOL_TRASH }, { "drive", LV_SYMBOL_DRIVE },
 	{ "sd", LV_SYMBOL_SD_CARD }, { "tint", LV_SYMBOL_TINT }, { "check", LV_SYMBOL_OK },
-	{ "link", LV_SYMBOL_WIFI },
+	{ "link", LV_SYMBOL_WIFI }, { "pause", LV_SYMBOL_PAUSE }, { "stop", LV_SYMBOL_STOP },
+	{ "prev", LV_SYMBOL_PREV }, { "next", LV_SYMBOL_NEXT }, { "minus", LV_SYMBOL_MINUS },
+	{ "plus", LV_SYMBOL_PLUS }, { "shuffle", LV_SYMBOL_SHUFFLE }, { "loop", LV_SYMBOL_LOOP },
+	{ "mute", LV_SYMBOL_MUTE },
 };
 
 /* drawn icons are designed on a 32 px box and scaled to the requested size */

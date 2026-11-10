@@ -20,7 +20,7 @@ set(LIB_SOURCES lib/ui_core.c lib/ui_frame.c lib/ui_keys.c lib/ui_theme.c lib/ui
 	lib/ui_widgets.c lib/ui_entry.c lib/ui_style.c lib/ui_icons.c lib/ui_focus.c lib/ui_rows.c lib/ui_controls.c lib/ui_boot.c lib/ui_keylight.c ${FONT_C})
 set(LAUNCHER_SOURCES launcher/home.c launcher/apps.c launcher/readout.c apps/settings/wpa.c)
 # each app: apps/<name>/*.c -> /usr/bin/wt41n0-<name>, plus its manifests apps/<name>/*.app
-set(APPS power settings scanner system)
+set(APPS power settings scanner system music)
 if(WT41N0_UI_EXAMPLE OR WT41N0_UI_HOST)
 	list(APPEND APPS example)
 endif()
@@ -63,6 +63,9 @@ else()
 		install(FILES ${app_manifests} DESTINATION share/wt41n0/apps)
 	endforeach()
 	target_link_libraries(wt41n0-settings PkgConfig::ALSA)
+	pkg_check_modules(MPDCLIENT REQUIRED IMPORTED_TARGET libmpdclient)
+	target_link_libraries(wt41n0-music PkgConfig::MPDCLIENT)
+	install(PROGRAMS apps/music/wt41n0-music-status DESTINATION bin)	# the home tile's readout
 	target_sources(wt41n0-system PRIVATE apps/settings/wpa.c)	# the Wi-Fi state
 	install(FILES apps/terminal/terminal.app DESTINATION share/wt41n0/apps)
 	# the other styles' faces, loaded by TinyTTF at run time (Share Tech Mono is built in)

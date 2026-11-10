@@ -18,6 +18,9 @@ sed -i "s/^BOOT_VERBOSITY=.*/BOOT_VERBOSITY=$verbosity/" "$TARGET/etc/default/wt
 # /boot on the eMMC root holds the recovery flag (see emmc-init)
 mkdir -p "$TARGET/boot"
 
+# MPD (/etc/mpd.conf): its database and state, and the music library
+mkdir -p "$TARGET/var/lib/mpd" "$TARGET/root/Music/Playlists"
+
 # The launcher instead of the shell on the LCD (tty1). The overlay brings a fresh
 # inittab at every build, so turning the option off restores the shell.
 if cfg_bool BR2_WT41N0_LAUNCHER; then
@@ -108,7 +111,9 @@ for f in gi-compile-repository gi-decompile-typelib gi-inspect-typelib pcre2grep
 done
 # Toolchain runtimes the prebuilt toolchain copies whether or not anything uses
 # them (C++, Fortran, OpenMP). Remove each one that no program in the image
-# links against, so adding a C++ package keeps working.
+# links against, so adding a C++ package keeps working. In an existing output
+# directory a removed one does not come back by itself: after adding the first C++
+# program, run "make toolchain-external-arm-arm-reinstall all".
 READELF=$(ls "$HOST_DIR"/bin/*-linux-gnueabihf-readelf 2>/dev/null | head -1)
 if [ -x "$READELF" ]; then
 	needed=$(find "$TARGET" -type f \( -perm -u+x -o -name '*.so*' \) -exec "$READELF" -d {} + 2>/dev/null |

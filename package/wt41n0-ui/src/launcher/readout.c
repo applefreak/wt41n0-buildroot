@@ -177,6 +177,10 @@ void readout_get(struct app *app, struct readout *r)
 	} else if (!strcmp(app->id, "system")) {
 		snprintf(r->line, sizeof(r->line), "LOAD 0.12  MEM 23%%");
 		r->level = 1;
+	} else if (!strcmp(app->id, "music")) {
+		snprintf(r->meta, sizeof(r->meta), "PLAY");
+		snprintf(r->line, sizeof(r->line), "THE STATIC SEA - NEON HARBOUR");
+		r->level = 3;
 	}
 	return;
 #else
