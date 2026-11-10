@@ -2,7 +2,7 @@
 
 ## Getting a shell without the keypad
 
-- **USB serial**: with the USB cable (or cradle) connected, the unit shows up as a
+- **USB serial**: in the cradle, connected over USB, the unit shows up as a
   serial port a few seconds after boot. `support/console.py 'dmesg | tail'` runs one
   command; any terminal program works for an interactive session. No network needed.
 - **ssh**: `ssh root@<address>` once Wi-Fi is configured.

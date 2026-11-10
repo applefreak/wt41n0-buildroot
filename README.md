@@ -6,24 +6,24 @@ packages it as an image the unit's own bootloader accepts over USB.
 
 The system runs from RAM, or from an ext4 root file system on the eMMC once installed
 there. It replaces the Windows CE image in the unit's OS area and leaves the bootloader
-alone, so flashing the stock OS image again restores the unit. The image is built entirely from this tree: no Zebra
-file is needed to build it.
+alone, so flashing the stock OS image again restores the unit.
 
-## What works
+## Hardware Status
 
+| Hardware | Status |
 |---|---|
 | Display, backlight | 320x240 LCD console, PWM brightness in `/sys/class/backlight` |
 | Keypad | all keys, with the orange / gray / blue layers on the text console (`keys` shows them); its backlight (`/sys/class/leds/keypad-backlight`) automatic, always on or off, set in Settings |
 | Touch screen | resistive panel as an input device (units without one are fine) |
 | LEDs, power button | the three body LEDs in `/sys/class/leds`; the power button opens the Power app and wakes the unit from suspend (`KEY_POWER`) |
 | CPU, power | 300 to 800 MHz by load; suspend (suspend-to-idle, `wt41n0-suspend`), woken by the power button; power-off, after which the cradle or a battery reinsertion starts the unit again (the power button cannot) |
-| Wi-Fi | WL1283, WPA2, 2.4 and 5 GHz; ssh server |
+| Wi-Fi | WL1283, WPA2, 2.4 and 5 GHz; SSH server |
 | Bluetooth | classic Bluetooth (BR/EDR): scan, discoverable, pairing with `bluetoothctl`; no Low Energy. Needs the chip's init script from your unit's Windows CE image (see `local/README.md`) |
-| USB | serial console over the USB / cradle cable (full speed) |
+| USB | serial console over the cradle's USB connection (full speed) |
 | Audio | built-in speaker through ALSA (`aplay file.wav`); built-in microphone records, but at the wrong rate for now |
 | Battery, charging | battery voltage, capacity, current and temperature in `/sys/class/power_supply`; charges in the cradle, with the middle LED blinking orange |
 | Ring scanner | barcodes from the ring scanner with its trigger (`wt41n0-scan`); the accessory ports also work as a plain serial port (`wt41n0-fpga serial on`, `/dev/ttyS1`) |
-| Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, System (device IDs, hardware and live sensor readings) and Power; four visual styles (CYBER, AERO, DECK, NUKE) |
+| Launcher | an LVGL home screen on the LCD with app tiles, Settings (Wi-Fi, display, sound, theme, text input, time zone, touch calibration), Scanner, System (device IDs, hardware and live sensor readings) and Power; four visual styles to choose from |
 | Sensors, storage | accelerometer (IIO), PMIC ADC, eMMC root file system that keeps every change (`support/install.py`) |
 
 Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, deep sleep (suspend works as suspend-to-idle).
@@ -32,7 +32,7 @@ Not working yet: Bluetooth Low Energy, headset audio, the hardware beeper, deep 
 
 - A Linux machine or container to build on (Buildroot does not build on macOS; see
   "Building in a container" below), with Buildroot's usual host packages and `python3`.
-- To flash: a USB cable or cradle, and Python with `pyusb`.
+- To flash: the cradle/dock, and Python with `pyusb`.
 
 ## Build
 
@@ -45,46 +45,45 @@ make BR2_EXTERNAL=../wt41n0 wt41n0_defconfig
 make
 ```
 
-The result is `output/images/wt41n0-linux.hex`.
+The images are in `output/images/`: `wt41n0-install.hex` (installs on the eMMC),
+`wt41n0-emmc.hex` (updates an installed unit) and `wt41n0-linux.hex` (runs from RAM).
 
-The image carries no Wi-Fi network and no ssh key: networks are added on the unit in
-Settings, and ssh uses the root password (see Use). For your own development images,
-`local/` can hold a `wifi.conf`, your `authorized_keys` and a fixed host key, built in
+If you wish to include your SSH public key and/or Wi-Fi config in the image, `local/`
+can hold a `wifi.conf`, your `authorized_keys` and a fixed host key, built in
 with `BR2_WT41N0_LOCAL_WIFI` and `BR2_WT41N0_LOCAL_SSH` (see `local/README.md`).
-Nothing in `local/` is tracked by git.
 
 ## Flash
 
-1. Put the unit in download mode: hold **P1** or **P2** while switching it on and
+There are three ways to flash the image: Zebra's official **USBDownload** tool, the
+`support/flash.py` script, or the **Web Flasher**.
+
+Whichever way you choose, first put the unit in USB download mode with the IPL (initial
+program loader):
+
+1. During a cold boot, when the screen shows three braces `}}}`, press **P2** and
    choose **Download from USB**.
-2. Connect it over USB and run `support/flash.py output/images/wt41n0-linux.hex`.
-3. When the transfer finishes, power-cycle the unit.
+2. Put the unit in the cradle, connected to the computer over USB, then:
+   1. With **USBDownload**: open `wt41n0-install.hex` with it, then click **Load**.
+   2. With the Python script: run `support/flash.py output/images/wt41n0-install.hex`.
+   3. With the **Web Flasher**: visit the
+      [Web Flasher](https://applefreak.github.io/wt41n0-buildroot/) and follow the
+      instructions there.
+3. When the transfer finishes, exit the IPL following the on-screen instructions.
 
-Without Python: `support/flasher/index.html` does the same in Chrome or Edge over
-WebUSB. It is published at <https://applefreak.github.io/wt41n0-buildroot/>
-(`.github/workflows/pages.yml`), or serve it locally (`cd support/flasher && python3 -m
-http.server 8000`, then open `http://localhost:8000`); choose the HEX file and click
-**Connect and flash**. On the published page, **Use the latest release** loads the
-latest release's `wt41n0-install.hex` instead (installs on a new unit, keeps an
-installed one). On Windows, bind the WinUSB driver to the unit (`05e0:200b`) with Zadig first.
+This installs Linux on the eMMC, erasing Windows CE completely. If you wish to keep the
+original `\Application` and `\Platform` partitions, use `wt41n0-linux.hex` instead: it
+runs from RAM, nothing is kept between boots, and .
 
-**Installing on the eMMC.** The system can also run from the eMMC, with an ext4 root
-file system that keeps every change: flash `output/images/wt41n0-install.hex` instead,
-and it installs itself at its first boot (or use `support/install.py` over ssh; see
-`docs/customizing.md`). This replaces the Windows CE data partitions.
-
-**Updating a running unit.** Once the unit runs this system and is reachable over ssh,
+**Updating a running unit.** Once the unit runs this system and is reachable over SSH,
 a new build can be installed without download mode. On a unit installed on the eMMC:
 
 ```sh
 support/update.py output/images/wt41n0-emmc.hex --host root@<address>
 ```
 
-(`wt41n0-linux.hex` instead for a unit running from RAM; on an installed unit it would
-switch it back to the RAM system.) This updates the kernel and the boot image only; the
-eMMC root file system keeps its files and settings (see `docs/customizing.md`). It
-writes the image to the same eMMC area download mode uses, verifies it and reboots.
-If an image does not boot, download mode and `flash.py` still work as before.
+Use `wt41n0-linux.hex` instead for a unit running from RAM; on a unit installed on the
+eMMC, it switches back to the RAM system. This updates the kernel and the boot image
+only; the eMMC root file system keeps its files and settings (see `docs/customizing.md`).
 
 To return to Windows CE, flash Zebra's stock OS update for the WT41N0
 (`41X0c70BenOS055702.hex`, from Zebra's support site) the same way. Get that file
@@ -94,11 +93,10 @@ before you start, so you always have a way back.
 
 The unit boots to the launcher on its LCD, driven by the keypad (or the touch screen):
 app tiles, numbered 1 to 9. The Terminal app is a root shell; the power button opens
-the Power app (suspend, reboot, power off). Easier ways in:
+the Power app. Easier ways in:
 
-- **ssh**: `ssh root@<address>`. The address is shown on the LCD when Wi-Fi connects.
-- **USB serial**: the unit appears as a serial port on the host
-  (`screen /dev/ttyACM0 115200`, or `support/console.py '<command>'`).
+- **SSH**: `ssh root@<address>`. The address is shown on the LCD when Wi-Fi connects.
+- **USB serial**: the unit appears as a serial port on the host.
 
 The launcher's settings live in `/etc/wt41n0/ui.conf` (`style=`, `palette=`,
 `accent=`, where palette and accent can be `auto` for the style's defaults; also
@@ -116,11 +114,10 @@ Everything is ordinary Buildroot: `make menuconfig` for packages,
   LCD debug console from its first instruction).
 - **The `local/` directory** for your private files.
 
-ssh logs in as root with the password **`wt41n0`**; the first login asks for a new one
+SSH logs in as root with the password **`wt41n0`**; the first login asks for a new password
 and ends the session if it is not changed. The consoles (the Terminal app and USB) are
-root shells without a login. Your own ssh key and a fixed host key can be built in
-instead (`BR2_WT41N0_LOCAL_SSH`, see `docs/customizing.md`). Tighten the consoles too
-before using a unit anywhere you do not control.
+root shells without a login. Your own SSH key and a fixed host key can be built in
+instead (`BR2_WT41N0_LOCAL_SSH`, see `docs/customizing.md`).
 
 ## Layout
 
@@ -132,23 +129,21 @@ package/wt41n0-loader/            loader the bootloader jumps to
 package/wt41n0-utils/             small board tools (pcmtest, keys, ...)
 package/wt41n0-ui/                the launcher, its apps and their LVGL library
 support/                          host tools: mkhex.py, flash.py, console.py, keymap.py,
-                                  flasher/ (the same flashing as a WebUSB web page)
+                                  flasher/
 docs/                             hardware notes and how the boot works
-local/                            your private files: Wi-Fi config, ssh keys (not tracked)
+local/                            your private files: Wi-Fi config, SSH keys (not tracked)
 ```
 
 ## Prebuilt images
 
-GitHub builds the images on every push (`.github/workflows/build.yml`): each run under
-**Actions** has them as an artifact, kept 7 days. A `v*` tag publishes them as a
-**Release**. These are the public configuration: without the Bluetooth init script
-(see `local/README.md`) Bluetooth is disabled; Wi-Fi works. For Bluetooth, build
-locally with the script in `local/firmware/`.
+Images built by GitHub are on the
+[**Releases**](https://github.com/applefreak/wt41n0-buildroot/releases) page. They have
+Bluetooth disabled (see the Bluetooth row above).
 
 ## Building in a container
 
-`build-in-container.sh` clones Buildroot, loads the defconfig, builds, and copies the
-images out. In any Debian or Ubuntu container with this tree mounted:
+If you're building on a non-Linux machine, the `build-in-container.sh` script clones
+Buildroot, loads the defconfig, builds, and copies the images out. In any Debian or Ubuntu container with this tree mounted:
 
 ```sh
 docker exec <container> bash -lc '/path/to/wt41n0/build-in-container.sh'

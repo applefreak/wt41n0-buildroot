@@ -51,9 +51,8 @@ The recovery system is the RAM system, with Wi-Fi, ssh and the installer.
   reboots into the new root.
 - **Back to the RAM-only system:** `support/update.py output/images/wt41n0-linux.hex`,
   or download mode with `flash.py`. The eMMC root stays as it is.
-- **Back to Windows CE:** flash the stock OS in download mode, then Zebra's
-  `CleanAppl.hex` and `CleanPlat.hex` from its OS update package. Windows CE then
-  formats fresh Application and Platform partitions on its first boot.
+- **Back to Windows CE:** flash the stock OS in download mode. The bootloader then
+  reformats the eMMC and recreates the Application and Platform partitions.
 
 ## Wi-Fi and ssh
 
