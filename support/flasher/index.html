@@ -69,13 +69,11 @@
 <main>
   <h1>WT41N0 USB Flasher</h1>
   <p class="lead">Sends a Symbol HEX image to a Zebra / Symbol WT41N0 in download mode, like
-    <code>support/flash.py</code>. Needs a Chromium-based browser (Chrome, Edge) and this page
-    opened from <code>localhost</code> or HTTPS.</p>
+    <code>support/flash.py</code>. Needs a Chromium-based browser (Chrome, Edge).</p>
 
   <section id="unsupported" hidden>
     <div class="status err">This browser has no WebUSB support.</div>
-    <div class="note">Use Chrome or Edge, and open the page through <code>http://localhost</code>
-      (for example <code>python3 -m http.server</code> in this folder) or HTTPS.</div>
+    <div class="note" id="unsupportedHint">Open this page in Chrome or Edge.</div>
   </section>
 
   <section>
@@ -108,8 +106,8 @@
     <div class="progress"><div id="bar"></div></div>
     <div class="stat" id="stat">&nbsp;</div>
     <div class="status" id="status"></div>
-    <div class="note">Keep the cable connected until the transfer finishes. The unit then stores
-      the image; it does not restart by itself, so power-cycle it afterwards.</div>
+    <div class="note">Keep the unit in the cradle until the transfer finishes. The unit then
+      stores the image; afterwards, exit the IPL following the on-screen instructions.</div>
   </section>
 
   <section>
@@ -288,7 +286,14 @@ async function flash() {
 }
 
 // ---- wiring ---------------------------------------------------------------------
-if (!navigator.usb) $("unsupported").hidden = false;
+if (!navigator.usb) {
+  $("unsupported").hidden = false;
+  // WebUSB also needs a secure page: only a local copy opened from a file or a
+  // plain-http address gets here in Chrome or Edge
+  if (!window.isSecureContext)
+    $("unsupportedHint").innerHTML = "Open the page in Chrome or Edge through <code>http://localhost</code> " +
+      "(for example <code>python3 -m http.server</code> in its folder) or HTTPS.";
+}
 $("file").addEventListener("change", e => e.target.files[0] && loadFile(e.target.files[0]));
 const drop = $("drop");
 ["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
