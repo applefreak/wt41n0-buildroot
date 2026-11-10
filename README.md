@@ -148,3 +148,26 @@ Buildroot, loads the defconfig, builds, and copies the images out. In any Debian
 ```sh
 docker exec <container> bash -lc '/path/to/wt41n0/build-in-container.sh'
 ```
+
+---
+
+## Disclaimer
+
+To achieve what we have today, an eMMC dump was extracted from a working unit by physically desoldering the memory chip and read with a XGecu T48.
+
+Software wise, most of this repository was written with an LLM (Claude Code), directed by me, who tested the results on real units and reviewed them.
+That covers:
+
+- the kernel patches, the device tree and the board scripts (`board/zebra/wt41n0/`);
+- the loader (`package/wt41n0-loader/`) and the board tools (`package/wt41n0-utils/`);
+- the launcher, its apps and their UI library (`package/wt41n0-ui/`); the visual design
+  was also made with Claude;
+- the host tools and the Web Flasher (`support/`);
+- the GitHub Actions workflows (`.github/workflows/`);
+- the documentation in `docs/` and most of this README.
+
+The hardware details (register addresses, pin assignments, how the stock boot chain and
+the microcontrollers behave) come from reverse engineering the stock Windows CE image and
+from experiments on the my units, also done with the LLM (Claude Code & KIMI).
+
+Flashing these images replaces the unit's operating system; use this at your own risk, and keep Zebra's stock OS image at hand to go back.
