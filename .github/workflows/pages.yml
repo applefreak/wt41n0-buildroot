@@ -5,7 +5,7 @@
 # One-time setup: repository Settings -> Pages -> Source: GitHub Actions.
 # build.yml starts this workflow after it publishes a release: a release made with the
 # workflow token does not fire the "release" event.
-name: pages
+name: Web Flasher
 
 on:
   push:
@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy the web flasher
     runs-on: ubuntu-24.04
     environment:
       name: github-pages
@@ -39,14 +40,27 @@ jobs:
         run: |
           mkdir -p _site/latest
           cp -r support/flasher/. _site/
-          # latest non-draft, non-prerelease release; none yet = no button on the page
-          if tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null); then
-            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern wt41n0-install.hex --dir _site/latest
+          # The newest published release (no drafts or prereleases) that already has the
+          # image attached: a release made by hand gets its files only when build.yml
+          # finishes, about an hour later, and is skipped until then (build.yml starts
+          # this workflow again once they are there). None = no button on the page.
+          IMG=wt41n0-install.hex
+          tag=""
+          for t in $(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts \
+                       --exclude-pre-releases --limit 30 --json tagName -q '.[].tagName'); do
+            if gh release view "$t" --repo "$GITHUB_REPOSITORY" --json assets \
+                 -q '.assets[].name' | grep -qx "$IMG"; then
+              tag=$t; break
+            fi
+            echo "release $t has no $IMG (yet): skipped"
+          done
+          if [ -n "$tag" ]; then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$IMG" --dir _site/latest
             gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt \
-              -q '{tag: .tagName, date: .publishedAt, file: "wt41n0-install.hex"}' > _site/latest/release.json
+              -q "{tag: .tagName, date: .publishedAt, file: \"$IMG\"}" > _site/latest/release.json
             cat _site/latest/release.json
           else
-            echo "no release yet: publishing the flasher without the latest-release button"
+            echo "no release with $IMG: publishing the flasher without the latest-release button"
           fi
           ls -la _site _site/latest
       - uses: actions/upload-pages-artifact@v3
