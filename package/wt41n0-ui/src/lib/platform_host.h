@@ -7,5 +7,8 @@ void host_key(unsigned int code);
 void keys_press_only(unsigned int code);	/* the same, without letting animations finish */	/* press and release a key (Linux input code) */
 int host_shot(const char *path);	/* write the screen as a 24-bit BMP */
 void host_touch(int x, int y, uint32_t ms);	/* press the simulated panel at a screen point */
+void host_press_at(int x, int y);		/* a drag: press, move (finger down), release */
+void host_drag_to(int x, int y, uint32_t ms);
+void host_release(void);
 int host_touch_map(int rx, int ry, int *x, int *y);	/* apply the stored calibration */
 #endif

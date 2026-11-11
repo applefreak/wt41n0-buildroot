@@ -4,7 +4,8 @@
  * refreshed every second. ENT on a value shows it whole.
  *
  * Every value is read from this unit while the app runs (sysfs, /proc, the OMAP's fused
- * die ID, the eMMC's CID), so it is right on any unit the image is installed on.
+ * die ID, the eMMC's CID, the serial number the Zebra bootloader keeps on the eMMC), so
+ * it is right on any unit the image is installed on.
  * WT41N0_SYSROOT prefixes the paths (the host harness points it at captured files).
  */
 #include <fcntl.h>
@@ -146,6 +147,45 @@ static bool die_id(char *buf, size_t len)
 #endif
 }
 
+/*
+ * The factory serial number (the label's S/N): the Zebra bootloader's "Monitor data"
+ * area at 3.5 MiB on the eMMC starts with "Monitor_DataSig"; 64 KiB further on, a record
+ * begins with the serial as UTF-16 text (14 digits, NUL padded to 32 bytes). Neither
+ * Windows CE nor this system's installer writes that area (docs/hardware.md, Storage).
+ * Read only; anything unexpected gives no serial rather than a wrong one.
+ */
+#define MONITOR_DATA	0x380000
+#define SERIAL_RECORD	(MONITOR_DATA + 0x10000)
+
+static bool factory_serial(char *buf, size_t len)
+{
+#ifndef WT41N0_UI_HOST
+	static const char sig[] = "Monitor_DataSig";
+	unsigned char rec[32];
+	char head[sizeof(sig)];
+	size_t i, n = 0;
+	int fd = open("/dev/mmcblk1", O_RDONLY | O_CLOEXEC);
+	bool ok;
+
+	if (fd < 0)
+		return false;
+	ok = pread(fd, head, sizeof(head), MONITOR_DATA) == (ssize_t)sizeof(head) && !memcmp(head, sig, sizeof(sig)) &&
+	     pread(fd, rec, sizeof(rec), SERIAL_RECORD) == (ssize_t)sizeof(rec);
+	close(fd);
+	if (!ok)
+		return false;
+	for (i = 0; i + 1 < sizeof(rec) && (rec[i] || rec[i + 1]); i += 2) {
+		if (rec[i + 1] || rec[i] < 0x21 || rec[i] > 0x7E || n + 1 >= len)
+			return false;		/* not plain text: not a serial */
+		buf[n++] = (char)rec[i];
+	}
+	buf[n] = 0;
+	return n >= 6;
+#else
+	return line("/serial", buf, len) != NULL;
+#endif
+}
+
 /* the Bluetooth address of hci0, from the HCI device info (no bluez needed) */
 static bool bt_address(char *buf, size_t len)
 {
@@ -191,8 +231,8 @@ static int fill_device(struct kv *kv)
 	int n = 0;
 
 	add(kv, &n, "MODEL", "%s", line("/proc/device-tree/model", b, sizeof(b)) ? b : "ZEBRA WT41N0");
+	add(kv, &n, "SERIAL NUMBER", "%s", factory_serial(b, sizeof(b)) ? b : "--");
 	add(kv, &n, "HARDWARE ID", "%s", die_id(b, sizeof(b)) ? b : "--");
-	add(kv, &n, "FACTORY SERIAL", "NOT STORED ON THE UNIT");
 	add(kv, &n, "EMMC SERIAL", "%s", line("/sys/block/mmcblk1/device/serial", b, sizeof(b)) ? b : "--");
 	add(kv, &n, "WI-FI MAC", "%s", line("/sys/class/net/wlan0/address", b, sizeof(b)) ? b : "--");
 	add(kv, &n, "BLUETOOTH", "%s", bt_address(b, sizeof(b)) ? b : "OFF");
@@ -572,7 +612,7 @@ static void summary(int s, char *out, size_t len)
 {
 	struct kv kv[MAX_KV];
 	int n = sections[s].fill(kv), i;
-	const char *want = s == 0 ? "HARDWARE ID" : s == 1 ? "TEMPERATURE" : s == 2 ? "IN USE" :
+	const char *want = s == 0 ? "SERIAL NUMBER" : s == 1 ? "TEMPERATURE" : s == 2 ? "IN USE" :
 			   s == 3 ? "ROOT IN USE" : s == 4 ? "IP ADDRESS" : s == 5 ? "CHARGE" :
 			   s == 6 ? "CPU TEMPERATURE" : "KERNEL";
 
@@ -582,7 +622,7 @@ static void summary(int s, char *out, size_t len)
 			short_value(out, len, kv[i].value);
 	if (!out[0] && n)
 		short_value(out, len, kv[0].value);
-	if (s == 0 && strlen(out) > 12)		/* the ID's first group is enough here */
+	if (s == 0 && strchr(out, '-') && strlen(out) > 12)	/* no serial: the die ID's first group */
 		snprintf(out + 8, len - 8, "...");
 }
 

@@ -38,6 +38,11 @@ static void list_free(lv_event_t *e)
 	lv_free(lv_event_get_user_data(e));
 }
 
+static void col_scrolled(lv_event_t *e)
+{
+	focus_ring_follow(lv_event_get_current_target(e));
+}
+
 lv_obj_t *ui_rows_create(lv_obj_t *content, int y, int h, bool compact)
 {
 	struct list *l = lv_malloc_zeroed(sizeof(*l));
@@ -50,6 +55,7 @@ lv_obj_t *ui_rows_create(lv_obj_t *content, int y, int h, bool compact)
 	lv_obj_set_style_pad_row(col, WT_ROW_GAP, 0);
 	lv_obj_set_scrollbar_mode(col, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_set_scroll_dir(col, LV_DIR_VER);
+	lv_obj_add_event_cb(col, col_scrolled, LV_EVENT_SCROLL, NULL);
 
 	l->col = col;
 	l->compact = compact;
@@ -119,6 +125,10 @@ static void row_event(lv_event_t *e)
 		break;
 	case LV_EVENT_DEFOCUSED:
 		colors(row, false);
+		break;
+	case LV_EVENT_CLICKED:		/* a tap: focus it before the app's handler runs */
+		if (lv_group_get_focused(ui_group()) != row)
+			lv_group_focus_obj(row);
 		break;
 	case LV_EVENT_KEY:
 		key = lv_event_get_key(e);
@@ -190,7 +200,7 @@ lv_obj_t *ui_row_ex(lv_obj_t *list, const char *icon, const char *name, const ch
 	const ui_palette_t *p = ui_palette();
 	struct list *l = lv_obj_get_user_data(list);
 	struct row *r;
-	lv_obj_t *row, *t;
+	lv_obj_t *row, *t, *first;
 	char num[12];
 
 	if (l->n == MAX_ROWS)
@@ -198,12 +208,16 @@ lv_obj_t *ui_row_ex(lv_obj_t *list, const char *icon, const char *name, const ch
 	r = lv_malloc_zeroed(sizeof(*r));
 	snprintf(r->text, sizeof(r->text), "%s", name);
 	row = ui_panel_kind(list, UI_PANEL_ROW, 0, 0, WT_ROW_W, l->compact ? WT_ROW_COMPACT_H : WT_ROW_H, true);
+	/* touch: a press may start a scroll, so the row takes the focus on the tap
+	 * (LV_EVENT_CLICKED, which LVGL does not send after a scroll), not on the press */
+	lv_obj_remove_flag(row, LV_OBJ_FLAG_CLICK_FOCUSABLE);
 	ui_panel_set_data(row, r);
 	lv_obj_add_event_cb(row, row_free, LV_EVENT_DELETE, r);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_left(row, l->compact ? 8 - 1 : 6 - 1, 0);
-	lv_obj_set_style_pad_right(row, 10 - 1, 0);
+	/* The side gaps are margins on the first and last item, not padding on the row:
+	 * the style's decorations (DECK's bevel lines, CYBER's top line) are positioned
+	 * from the row's content area, and padding would move them inward. */
 	lv_obj_set_style_pad_column(row, 8, 0);
 
 	if (flags & UI_ROW_CHECK) {
@@ -243,6 +257,9 @@ lv_obj_t *ui_row_ex(lv_obj_t *list, const char *icon, const char *name, const ch
 		lv_obj_set_style_text_font(r->chevron, &lv_font_montserrat_12, 0);
 		lv_obj_set_width(r->chevron, 10);
 	}
+	first = r->check ? r->check : r->number ? r->number : r->icon ? r->icon : r->name;
+	lv_obj_set_style_margin_left(first, l->compact ? 8 - 1 : 6 - 1, 0);
+	lv_obj_set_style_margin_right(r->chevron ? r->chevron : r->value, 10 - 1, 0);
 	colors(row, false);
 	if (l->done)
 		fit_name(row);

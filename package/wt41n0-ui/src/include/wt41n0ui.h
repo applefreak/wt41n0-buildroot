@@ -69,6 +69,8 @@ typedef enum {
 } ui_role_t;
 const lv_font_t *ui_font_role(ui_role_t role);
 void ui_text_role(lv_obj_t *label, ui_role_t role);
+/* vertical padding that keeps the text centred in the label (Aldrich needs an offset) */
+void ui_text_pad_ver(lv_obj_t *label, int pad);
 /* Style, palette and accent (SPEC.md, Theming). Names are lower case; palette and accent
  * may also be "auto" (the style's default). ui_theme_set() with save = false previews. */
 const char *const *ui_style_names(void);	/* NULL-terminated */

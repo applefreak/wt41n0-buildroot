@@ -11,6 +11,18 @@ static lv_color_t ring_color;
 static lv_area_t ring_from, ring_to;
 static enum ui_transition next_transition = UI_SLIDE_NONE;
 
+/* A screen being built: focus changes until it is done (the first element added to the
+ * group takes the focus by itself, then the screen focuses the one it wants) place the
+ * ring at once, so it does not glide over from the top-left element. Cleared on the
+ * next timer pass, after the building code has returned. */
+static bool ring_settling;
+
+static void ring_settled(void *arg)
+{
+	(void)arg;
+	ring_settling = false;
+}
+
 static void ring_deleted(lv_event_t *e)
 {
 	if (lv_event_get_target(e) == ring)
@@ -25,6 +37,8 @@ void focus_ring_create(lv_obj_t *scr)
 	lv_obj_add_flag(ring, LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_event_cb(ring, ring_deleted, LV_EVENT_DELETE, NULL);
+	ring_settling = true;
+	lv_async_call(ring_settled, NULL);
 }
 
 /* areas are screen-relative: the screen itself moves while it slides in */
@@ -62,6 +76,8 @@ static bool ring_skips(lv_obj_t *obj)
 	return lv_obj_check_type(obj, &lv_keyboard_class) || lv_obj_check_type(obj, &lv_slider_class);
 }
 
+static bool focusing;			/* in group_focus_cb: its own scrolling */
+
 static void group_focus_cb(lv_group_t *g)
 {
 	lv_obj_t *obj = lv_group_get_focused(g);
@@ -74,7 +90,9 @@ static void group_focus_cb(lv_group_t *g)
 		return;
 	}
 	/* scroll it into view first, so the ring goes where the element ends up */
+	focusing = true;
 	lv_obj_scroll_to_view_recursive(obj, LV_ANIM_OFF);
+	focusing = false;
 	lv_obj_update_layout(obj);
 	first = lv_obj_has_flag(ring, LV_OBJ_FLAG_HIDDEN);
 	style_ring(ring, obj, ring_override ? &ring_color : NULL);
@@ -83,7 +101,8 @@ static void group_focus_cb(lv_group_t *g)
 	lv_area_increase(&ring_to, -style_ring_inset(), -style_ring_inset());
 	lv_obj_remove_flag(ring, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_move_foreground(ring);
-	if (first) {
+	if (first || ring_settling) {
+		lv_anim_delete(ring, ring_anim_cb);
 		ring_set(&ring_to);
 		return;
 	}
@@ -97,6 +116,33 @@ static void group_focus_cb(lv_group_t *g)
 	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
 	lv_anim_delete(ring, ring_anim_cb);
 	lv_anim_start(&a);
+}
+
+/*
+ * A list scrolled by touch (or its scroll throw): the ring stays on the focused row,
+ * at once, and hides while that row is not wholly inside the scrolling area (it would
+ * otherwise float over the status or hint bar). Keypad focus moves do their own
+ * scrolling and animate the ring as before.
+ */
+void focus_ring_follow(lv_obj_t *scroller)
+{
+	lv_obj_t *obj = lv_group_get_focused(ui_group());
+	lv_area_t a, view;
+
+	if (focusing || !ring || !obj || lv_obj_get_parent(obj) != scroller || ring_skips(obj) ||
+	    lv_obj_get_screen(obj) != lv_obj_get_parent(ring))
+		return;
+	lv_anim_delete(ring, ring_anim_cb);
+	lv_obj_get_coords(obj, &a);
+	lv_obj_get_coords(scroller, &view);
+	if (a.y1 < view.y1 || a.y2 > view.y2) {
+		lv_obj_add_flag(ring, LV_OBJ_FLAG_HIDDEN);
+		return;
+	}
+	screen_relative(obj, &ring_to);
+	lv_area_increase(&ring_to, -style_ring_inset(), -style_ring_inset());
+	ring_set(&ring_to);
+	lv_obj_remove_flag(ring, LV_OBJ_FLAG_HIDDEN);
 }
 
 void focus_init(lv_group_t *g)

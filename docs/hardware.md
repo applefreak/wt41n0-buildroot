@@ -137,7 +137,7 @@ little-endian). The entries that describe the user area:
 | BootLoader | 0 | 0.5 MiB | x-loader and bootloader (configuration header `CHSETTINGS` at 0) |
 | Monitor | 1 MiB | 2 MiB | Symbol monitor (an image with the `ECEC` signature) |
 | partition table | 3 MiB | | this table |
-| Monitor data | 3.5 MiB | 4 MiB | written by the monitor (changes after USB downloads) |
+| Monitor data | 3.5 MiB | 4 MiB | written by the monitor (changes after USB downloads); holds the factory serial number, see below |
 | Config Block | 4 MiB | 4.5 MiB | written by the monitor |
 | Splash screen | 4.5 MiB | 5.5 MiB | boot splash bitmap |
 | *unassigned* | 5.5 MiB | 80 MiB | not in the table; all zeros |
@@ -145,6 +145,14 @@ little-endian). The entries that describe the user area:
 | Application | 200 MiB | 1368 MiB | Windows CE `\Application`: TexFAT volume with the unit's Windows CE configuration |
 | Platform | 1368 MiB | 1880 MiB | Windows CE `\Platform`: TexFAT volume, empty |
 | Scratchpad | 1880 MiB | 1888 MiB | written by the stock OS |
+
+The **factory serial number** (the label's S/N) is in the Monitor data area: the area
+starts with `Monitor_DataSig` at 0x380000, and a record at 0x390000 starts with the
+serial as UTF-16 text (14 digits, NUL-padded to 32 bytes). Next come six 0xFF bytes and
+six bytes that look like a MAC address with a Zebra prefix (`40:83:DE…`, `94:FB:29…`).
+That address differs from the one Linux's Wi-Fi uses (derived from the chip), and it is
+unconfirmed what it is. Download mode, Windows CE and this system's installer all leave
+the serial in place; the System app shows it.
 
 - Application and Platform each start with a one-sector MBR (one entry, type `0x0b`)
   followed by a TexFAT volume (exFAT with two FATs). Windows CE formats them itself when

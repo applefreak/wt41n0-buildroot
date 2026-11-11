@@ -262,6 +262,23 @@ const lv_font_t *ui_font(int px)
 const lv_font_t *ui_font_icons(void) { return &lv_font_montserrat_28; }
 const lv_font_t *ui_font_icons24(void) { return &lv_font_montserrat_24; }
 
+/*
+ * Vertical padding for a label, allowing for its face. Aldrich's capitals reach 2 px
+ * above its line box, and the box keeps 4 px of descender room below them that
+ * upper-case text never uses: with an even pad the text sits at the top of a label's
+ * background (DECK's chips and name strips). So Aldrich gets 4 px more at the top and
+ * 2 px less at the bottom: the box is 2 px taller than its line, the capitals centred.
+ */
+void ui_text_pad_ver(lv_obj_t *label, int pad)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(label, 0);
+	bool aldrich = cur_style == WT_STYLE_DECK &&
+		       (f == face_font(F_ALDRICH, 13) || f == face_font(F_ALDRICH, 14));
+
+	lv_obj_set_style_pad_top(label, pad + (aldrich ? 4 : 0), 0);
+	lv_obj_set_style_pad_bottom(label, pad - (aldrich ? 2 : 0), 0);
+}
+
 const lv_font_t *ui_font_role(ui_role_t role)
 {
 	const struct role_font *r = &roles[cur_style][role];
@@ -273,7 +290,6 @@ void ui_text_role(lv_obj_t *label, ui_role_t role)
 {
 	lv_obj_set_style_text_font(label, ui_font_role(role), 0);
 	lv_obj_set_style_text_letter_space(label, roles[cur_style][role].track, 0);
-	/* Aldrich's glyphs reach above its line box: room for them inside the label */
 	if (roles[cur_style][role].face == F_ALDRICH)
-		lv_obj_set_style_pad_top(label, 2, 0);
+		ui_text_pad_ver(label, 0);
 }

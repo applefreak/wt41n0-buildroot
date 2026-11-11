@@ -45,6 +45,17 @@ static lv_obj_t *box(lv_obj_t *parent)
 	return o;
 }
 
+/* A label as wide as its widest possible text, so changing values ("87%" -> "100%",
+ * "18:33" -> "11:11" in the proportional faces) do not shift what sits beside them. */
+static void fixed_width(lv_obj_t *label, const char *widest, lv_text_align_t align)
+{
+	const lv_font_t *f = lv_obj_get_style_text_font(label, 0);
+	int32_t w = lv_text_get_width(widest, (uint32_t)strlen(widest), f, lv_obj_get_style_text_letter_space(label, 0));
+
+	lv_obj_set_width(label, w);
+	lv_obj_set_style_text_align(label, align, 0);
+}
+
 static lv_obj_t *text(lv_obj_t *parent, ui_role_t role, lv_color_t color, const char *s)
 {
 	lv_obj_t *l = lv_label_create(parent);
@@ -244,7 +255,7 @@ static void status_bar(lv_obj_t *scr, const char *title)
 		lv_obj_set_style_pad_hor(tape, 5, 0);
 		lv_obj_add_flag(tape, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 		l = text(tape, UI_ROLE_TITLE, p->bg, title);
-		lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 2);
+		lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, -1);	/* the role's padding centres the capitals; -1: 15 px label in a 16 px tape */
 	} else {
 		l = text(left, UI_ROLE_TITLE, p->text, title);
 	}
@@ -288,8 +299,8 @@ static void status_bar(lv_obj_t *scr, const char *title)
 	lv_obj_set_size(batt, BATTERY_SEGS * 4 + 3, 10);
 	lv_obj_set_style_border_color(batt, p->text_bright, 0);
 	lv_obj_set_style_border_width(batt, 1, 0);
-	for (i = 0; i < BATTERY_SEGS; i++)
-		st.battery_seg[i] = rect(batt, 2 + i * 4, 2, 3, 6, p->text);
+	for (i = 0; i < BATTERY_SEGS; i++)	/* positions count from inside the 1 px border: a 1 px gap all round */
+		st.battery_seg[i] = rect(batt, 1 + i * 4, 1, 3, 6, p->text);
 	clock_parent = right;
 	if (style == WT_STYLE_DECK) {
 		lv_obj_t *w = led_well(right);
@@ -308,9 +319,11 @@ static void status_bar(lv_obj_t *scr, const char *title)
 			lv_obj_set_style_pad_hor(clock_parent, 5, 0);
 		}
 		st.clock = text(clock_parent, UI_ROLE_DATA, p->text, "--:--");
-		if (clock_parent != right)
-			lv_obj_center(st.clock);
+		if (clock_parent != right)	/* centred in the pill lands 1 px below the percentage */
+			lv_obj_align(st.clock, LV_ALIGN_CENTER, 0, -1);
 	}
+	fixed_width(st.battery_pct, "100%", LV_TEXT_ALIGN_RIGHT);
+	fixed_width(st.clock, "88:88", LV_TEXT_ALIGN_CENTER);
 }
 
 /* ---- hint bar ----------------------------------------------------------------- */

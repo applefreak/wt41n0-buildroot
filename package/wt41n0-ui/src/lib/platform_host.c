@@ -30,6 +30,8 @@ const char *platform_conf_path(void)
 	return p ? p : "ui.conf";
 }
 
+static void sim_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
+
 void platform_init(void)
 {
 	static uint16_t buf1[WT_SCREEN_W * 40], buf2[WT_SCREEN_W * 40];
@@ -38,6 +40,10 @@ void platform_init(void)
 	lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 	lv_display_set_flush_cb(disp, flush_cb);
 	lv_display_set_buffers(disp, buf1, buf2, sizeof(buf1), LV_DISPLAY_RENDER_MODE_PARTIAL);
+	lv_indev_t *touch = lv_indev_create();
+
+	lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_read_cb(touch, sim_read_cb);
 }
 
 void platform_wait(uint32_t ms) { (void)ms; }
@@ -53,6 +59,12 @@ void platform_exit(void) {}
 
 int platform_battery(bool *charging)
 {
+	const char *e = getenv("WT41N0_HOST_BATTERY");	/* a test value, e.g. 7 or 100 */
+
+	if (e) {
+		*charging = false;
+		return atoi(e);
+	}
 	if (charging)
 		*charging = false;
 	return 87;
@@ -67,8 +79,25 @@ static bool sim_down, sim_have_cal;
 static double sim_cal[6];
 
 bool platform_has_touch(void) { return true; }
+static bool sim_enabled = true;
 bool platform_touch_raw(int *x, int *y) { *x = sim_rx; *y = sim_ry; return sim_down; }
-void platform_touch_enable(bool on) { (void)on; }
+void platform_touch_enable(bool on) { sim_enabled = on; }
+
+/* the simulated panel as LVGL's pointer, through the stored calibration like the unit
+ * (platform_linux.c); off while the calibration screen reads it raw */
+static void sim_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+{
+	static lv_point_t last;
+	int x, y;
+
+	(void)indev;
+	if (sim_enabled && sim_have_cal && host_touch_map(sim_rx, sim_ry, &x, &y) == 0) {
+		last.x = x < 0 ? 0 : x >= WT_SCREEN_W ? WT_SCREEN_W - 1 : x;
+		last.y = y < 0 ? 0 : y >= WT_SCREEN_H ? WT_SCREEN_H - 1 : y;
+	}
+	data->point = last;
+	data->state = sim_enabled && sim_have_cal && sim_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
 void platform_touch_set_cal(const double cal[6]) { memcpy(sim_cal, cal, sizeof(sim_cal)); sim_have_cal = true; }
 
 void host_touch(int x, int y, uint32_t ms)
@@ -77,6 +106,40 @@ void host_touch(int x, int y, uint32_t ms)
 	sim_ry = 400 + x * 11;
 	sim_down = true;
 	host_advance(ms);
+	sim_down = false;
+	host_advance(150);
+}
+
+/* a drag: press at a point, move it in steps (the finger stays down), release */
+static int drag_x, drag_y;
+
+void host_press_at(int x, int y)
+{
+	drag_x = x;
+	drag_y = y;
+	sim_rx = 3500 - y * 12 + x / 40;
+	sim_ry = 400 + x * 11;
+	sim_down = true;
+	host_advance(60);
+}
+
+void host_drag_to(int x, int y, uint32_t ms)
+{
+	int i, x0 = drag_x, y0 = drag_y;
+
+	for (i = 1; i <= 10; i++) {
+		int cx = x0 + (x - x0) * i / 10, cy = y0 + (y - y0) * i / 10;
+
+		sim_rx = 3500 - cy * 12 + cx / 40;
+		sim_ry = 400 + cx * 11;
+		host_advance(ms / 10);
+	}
+	drag_x = x;
+	drag_y = y;
+}
+
+void host_release(void)
+{
 	sim_down = false;
 	host_advance(150);
 }

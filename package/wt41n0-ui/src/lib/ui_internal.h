@@ -50,6 +50,8 @@ int style_ring_inset(void);
 /* Focus ring and screen transitions (ui_focus.c) */
 void focus_init(lv_group_t *g);
 void focus_ring_create(lv_obj_t *scr);
+const char *icon_symbol(const char *name);	/* ui_icons.c: a symbol icon's glyph, NULL if drawn */
+void focus_ring_follow(lv_obj_t *scroller);	/* a list scrolled: the ring stays on its row */
 lv_screen_load_anim_t focus_take_transition(void);
 
 void ui_hint_save(char *pairs, size_t plen, char *marker, size_t mlen);

@@ -258,11 +258,7 @@ lv_obj_t *ui_chip(lv_obj_t *parent, ui_role_t role, const char *text)
 	lv_obj_set_style_bg_color(l, p->accent, 0);
 	lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(l, s == WT_STYLE_AERO ? 8 : 4, 0);
-	lv_obj_set_style_pad_ver(l, s == WT_STYLE_AERO ? 2 : 1, 0);
-	if (s == WT_STYLE_DECK) {	/* Aldrich capitals sit high in their box */
-		lv_obj_set_style_pad_top(l, 2, 0);
-		lv_obj_set_style_pad_bottom(l, 0, 0);
-	}
+	ui_text_pad_ver(l, s == WT_STYLE_AERO ? 2 : 1);
 	if (s == WT_STYLE_AERO)
 		lv_obj_set_style_radius(l, 9, 0);
 	return l;
@@ -333,8 +329,7 @@ lv_obj_t *ui_number(lv_obj_t *parent, const char *text)
 		lv_obj_set_style_bg_opa(n, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_color(n, p->dark, 0);
 		lv_obj_set_style_border_side(n, LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT, 0);
-		lv_obj_set_style_border_width(n, 1, 0);
-		lv_obj_set_style_pad_top(n, 1, 0);
+		lv_obj_set_style_border_width(n, 1, 0);	/* no top padding: the digits sit low in the well otherwise */
 		break;
 	case WT_STYLE_NUKE:	/* 16 px square */
 		lv_obj_set_size(n, 16, 16);
@@ -374,12 +369,21 @@ void ui_number_focus(lv_obj_t *n, bool focused)
 /* An icon as the style shows it on tiles and buttons: AERO puts it in a 32 px ring */
 lv_obj_t *ui_style_icon(lv_obj_t *parent, const char *name, int size)
 {
-	lv_obj_t *icon = ui_icon_sized(parent, name, size);
+	lv_obj_t *icon;
 
 	if (ui_theme_style() == WT_STYLE_AERO) {
+		/* a ring of the full size with the icon 4 px smaller inside: the drawn icons
+		 * (terminal, barcode, chip) use their whole box and would cross the ring */
+		icon = lv_obj_create(parent);
+		lv_obj_remove_style_all(icon);
+		lv_obj_set_size(icon, size, size);
+		lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 		lv_obj_set_style_radius(icon, LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_border_width(icon, 1, 0);
 		lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
+		lv_obj_center(ui_icon_sized(icon, name, size - 4));
+	} else {
+		icon = ui_icon_sized(parent, name, size);
 	}
 	ui_style_icon_focus(icon, false);
 	return icon;
@@ -422,8 +426,7 @@ void ui_name_focus(lv_obj_t *label, const char *name, bool focused)
 		lv_obj_set_style_bg_color(label, focused ? p->accent : p->bg, 0);
 		lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
 		lv_obj_set_style_pad_hor(label, 5, 0);
-		lv_obj_set_style_pad_top(label, 2, 0);	/* Aldrich capitals sit high */
-		lv_obj_set_style_pad_bottom(label, 0, 0);
+		ui_text_pad_ver(label, 0);
 		return;
 	}
 	lv_obj_set_style_text_color(label, focused && ui_theme_style() == WT_STYLE_CYBER ? p->accent : p->text, 0);
