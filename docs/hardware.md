@@ -342,8 +342,66 @@ with an RS419, firmware `PAACBS00-002-R01`):
 - The trigger contact bounces; read the settled level after an edge.
 
 `wt41n0-scan` implements this and prints one barcode per line. For other accessories,
-`wt41n0-fpga serial on` switches on both outputs and leaves `/dev/ttyS1` to any program;
-the connector's pinout and signal levels have not been measured yet.
+`wt41n0-fpga serial on` switches on both outputs and leaves `/dev/ttyS1` to any program.
+
+### Connector pinout
+
+From the WT41N0 Integrator Guide (Appendix A, "Wearable Terminal Interface Connector
+Pin-Outs"); it lists the right-hand connector, whose per-side signals end in `_RIGHT`:
+
+| Pin | Signal | Function |
+|---|---|---|
+| 1 | SCANNER_DETECT_RIGHT | scanner detect |
+| 2 | USBH_N_RIGHT | USB host D- |
+| 3 | GND | digital ground |
+| 4 | USBH_P_RIGHT | USB host D+ |
+| 5 | A_GND | analog ground |
+| 6 | HPOUTL_RIGHT_MIC+ | microphone + (default) or headphone left |
+| 7 | U2_RXD | scanner serial RX (UART2) |
+| 8 | HPOUTR_RIGHT | headphone right |
+| 9 | U2_TXD | scanner serial TX (UART2) |
+| 10 | SCAN_PWR | scanner 3.3 V power out |
+| 11 | U2_CTS | scanner serial CTS, or audio ground sense / microphone - with an audio cable |
+| 12 | U2_RTS | scanner serial RTS |
+
+The serial lines (`U2_`) of both connectors are UART2, so the two ports are one serial
+device. USB host, audio and detect are per side; none of them is supported yet.
+
+### A ring scanner's cable, measured
+
+A ring scanner cable (connector end plugged into the unit, the scanner cut off) has nine
+wires. Measured with a logic analyzer against brown, while the unit switched the port's
+outputs (`wt41n0-fpga power` / `serial`) and sent data on `/dev/ttyS1`:
+
+| Wire | Port off | Power on | Serial lines on, sending | Port closed again | Identified as |
+|---|---|---|---|---|---|
+| brown | | | | | **ground** (the reference: the unit's TX and RTS swing 0 to 3.4 V against it) |
+| white | 3.4 V | 3.4 V | toggles 0 / 3.4 V with the data | 3.4 V | **TX** (pin 9): the unit's data out |
+| red | 3.4 V | 3.4 V | 0 V while the port is open | 3.4 V | **RTS** (pin 12): low while asserted |
+| orange | 0 V | 0 V | 3.4 V, held | 3.4 V | held high once the serial lines are connected: **RX** (pin 7) or CTS (pin 11), see below |
+| blue | 3.1 V | 3.1 V | 3.1 V | 3.1 V | always 3.1 V: SCAN_PWR (pin 10), or a pulled-up line |
+| black | 0 V, floating | 0 V, held | 0 V, held | 0 V, held | switched by the port power: possibly the accessory's ground, switched on the low side |
+| purple | 1.6 V | 1.6 V | 1.6 V | 1.6 V | a mid-rail level: possibly the microphone bias (pin 6) |
+| yellow | floating | floating | floating | floating | not driven: audio or USB host? |
+| green | floating | floating | floating | floating | not driven: audio or USB host? |
+
+Confirmed: the port's logic is **3.3 V** (3.4 V high), brown is ground, white is the
+unit's TX (9600 baud measured as 104.0 µs bits), red is RTS.
+
+White shorted to orange (a loopback test): orange held the line at 3.4 V and the unit's
+TX could no longer pull it low (no edges, nothing received: `rx` stayed 0). Orange is
+therefore not a weak input but held high firmly, through a strong pull-up or the output
+of a level shifter, and so are perhaps the other serial lines: shorting two of the
+port's lines together is a test to avoid. TX worked normally again afterwards. No wire rose to 3.3 V when the port's power was switched on: the
+switching is on the ground side (black), or SCAN_PWR is on all the time (blue).
+
+Still open (next: load each wire to brown through a 1 kΩ resistor, which limits the
+current to about 3 mA, and watch the voltage and the unit's inputs): whether orange is
+RX or CTS, and whether an accessory's TX can drive it (the unit's own TX could not), whether blue is the supply or a pulled-up signal, black's role, and which
+of the others are scanner detect, the trigger (OMAP GPIO 2), audio and USB. For a
+3.3 V serial accessory such as a Meshtastic node, brown (ground), white (the unit's TX,
+to the accessory's RX) and orange (probably the unit's RX, from the accessory's TX)
+are the wires to use; check orange first.
 
 ## Not yet identified
 

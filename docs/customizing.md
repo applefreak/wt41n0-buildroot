@@ -172,6 +172,16 @@ echo timer > /sys/class/leds/wt41n0:red:middle/trigger
 echo 10 > /sys/class/backlight/backlight/brightness      # 0..17
 ```
 
+The launcher and its apps dim the screen after a time without a key or a touch, then
+switch its backlight off; the next key or touch brings it back, and while the screen is
+off that key or touch does nothing else. The times are in Settings, Display, or in
+`/etc/wt41n0/ui.conf`: `screen_dim=` (seconds, default 30) and `screen_off=` (default
+120), where 0 means never. Dimmed is a quarter of the chosen brightness. The UI processes
+share the time of the last input through the modification time of
+`/run/wt41n0-ui-active`, so an app built on another copy of the UI library has to touch
+that file on input (or the screen dims while it is in use). The keypad light works the
+same way with `keylight_mode=auto` and `keylight_timeout=`.
+
 ## Kernel
 
 `board/zebra/wt41n0/linux.fragment` is applied on top of `omap2plus_defconfig`, and

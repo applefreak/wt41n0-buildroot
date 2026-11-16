@@ -45,6 +45,7 @@ static void brightness_changed(int percent)
 	sys_set_brightness(v < 1 ? 1 : v);	/* never 0: the screen would go dark */
 	snprintf(buf, sizeof(buf), "%d", v < 1 ? 1 : v);
 	ui_conf_set("brightness", buf);
+	ui_screenlight_apply();			/* the level to dim from and come back to */
 }
 
 static void unavailable(lv_obj_t *content, const char *icon, const char *msg)
@@ -53,20 +54,92 @@ static void unavailable(lv_obj_t *content, const char *icon, const char *msg)
 	ui_hint_keys("ESC BACK", "");
 }
 
-static void display_screen(void)
+/* the display settings, as a list: BRIGHTNESS opens its slider, ENT cycles the times */
+enum { DS_LEVEL, DS_DIM, DS_OFF };
+static const int dim_times[] = { 15, 30, 60, 120, 300, 0 };		/* 0: never */
+static const int off_times[] = { 60, 120, 300, 600, 1800, 0 };
+#define NDIM (int)(sizeof(dim_times) / sizeof(dim_times[0]))
+#define NOFF (int)(sizeof(off_times) / sizeof(off_times[0]))
+static lv_obj_t *ds_rows[3];
+static void display_screen(int focus);
+static void back_display_list(void) { display_screen(DS_LEVEL); }
+
+static void seconds_text(int s, char *buf, size_t len)
 {
-	int cur = sys_brightness(&backlight_max), pct;
-	lv_obj_t *c = ui_screen("SETTINGS/DISPLAY");
+	if (!s)
+		snprintf(buf, len, "NEVER");
+	else if (s >= 60)
+		snprintf(buf, len, "%d MIN", s / 60);
+	else
+		snprintf(buf, len, "%d S", s);
+}
+
+static void display_values(void)
+{
+	char t[16];
+	int cur = sys_brightness(&backlight_max);
+
+	snprintf(t, sizeof(t), "%d%%", backlight_max > 0 && cur >= 0 ? (cur * 100 + backlight_max / 2) / backlight_max : 0);
+	ui_row_set_value(ds_rows[DS_LEVEL], t);
+	seconds_text(ui_screenlight_dim(), t, sizeof(t));
+	ui_row_set_value(ds_rows[DS_DIM], t);
+	seconds_text(ui_screenlight_off(), t, sizeof(t));
+	ui_row_set_value(ds_rows[DS_OFF], t);
+}
+
+static void cycle_time(const char *key, const int *times, int n, int cur)
+{
+	char buf[8];
+	int i;
+
+	for (i = 0; i < n && times[i] != cur; i++)
+		;
+	snprintf(buf, sizeof(buf), "%d", times[(i + 1) % n]);
+	ui_conf_set(key, buf);
+}
+
+static void display_row_clicked(lv_event_t *e)
+{
+	int row = (int)(intptr_t)lv_event_get_user_data(e);
+
+	if (row == DS_LEVEL) {
+		int cur = sys_brightness(&backlight_max), pct;
+		lv_obj_t *c = ui_screen("SETTINGS/DISPLAY");
+
+		ui_on_back(back_display_list);
+		pct = (cur * 100 + backlight_max / 2) / backlight_max;
+		pct = (pct + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
+		lv_group_focus_obj(ui_slider_card(c, "display", "BRIGHTNESS", "%", WT_SLIDER_STEP, 100,
+						  pct < WT_SLIDER_STEP ? WT_SLIDER_STEP : pct, brightness_changed));
+		return;
+	}
+	if (row == DS_DIM)		/* 15 s -> 30 s -> 1 -> 2 -> 5 min -> never */
+		cycle_time("screen_dim", dim_times, NDIM, ui_screenlight_dim());
+	else				/* 1 -> 2 -> 5 -> 10 -> 30 min -> never */
+		cycle_time("screen_off", off_times, NOFF, ui_screenlight_off());
+	ui_screenlight_apply();
+	display_values();
+}
+
+static void display_screen(int focus)
+{
+	int cur = sys_brightness(&backlight_max), i;
+	lv_obj_t *c = ui_screen("SETTINGS/DISPLAY"), *list;
 
 	ui_on_back(back_display);
 	if (cur < 0 || backlight_max <= 0) {
 		unavailable(c, "warning", "NO BACKLIGHT CONTROL");
 		return;
 	}
-	pct = (cur * 100 + backlight_max / 2) / backlight_max;
-	pct = (pct + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
-	lv_group_focus_obj(ui_slider_card(c, "display", "BRIGHTNESS", "%", WT_SLIDER_STEP, 100,
-					  pct < WT_SLIDER_STEP ? WT_SLIDER_STEP : pct, brightness_changed));
+	ui_hint_keys("\xE2\x86\x91\xE2\x86\x93 SELECT|ENT CHANGE|ESC BACK", "");
+	list = ui_rows_create(c, WT_INNER_Y, WT_INNER_H, false);
+	ds_rows[DS_LEVEL] = ui_row(list, "display", "BRIGHTNESS", "");
+	ds_rows[DS_DIM] = ui_row(list, "clock", "DIM AFTER", "");
+	ds_rows[DS_OFF] = ui_row(list, "power", "TURN OFF AFTER", "");
+	for (i = 0; i < 3; i++)
+		lv_obj_add_event_cb(ds_rows[i], display_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+	display_values();
+	ui_rows_done(list, focus);
 }
 
 /* ---- keypad light: mode, auto timeout, brightness -------------------------------- */
@@ -125,7 +198,7 @@ static void keylight_row_clicked(lv_event_t *e)
 		ui_conf_set("keylight_timeout", buf);
 		break;
 	default: {
-		lv_obj_t *c = ui_screen("KEYPAD/BRIGHTNESS");
+		lv_obj_t *c = ui_screen("SETTINGS/KEYPAD");
 		int cur = (ui_keylight_level() + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
 
 		ui_on_back(back_keylight_list);
@@ -455,7 +528,7 @@ static void menu_clicked(lv_event_t *e)
 
 	switch ((int)(intptr_t)lv_event_get_user_data(e)) {
 	case ROW_WIFI: wifi_open(back_menu); break;
-	case ROW_DISPLAY: display_screen(); break;
+	case ROW_DISPLAY: display_screen(DS_LEVEL); break;
 	case ROW_KEYLIGHT: keylight_screen(KL_MODE); break;
 	case ROW_SOUND: sound_screen(); break;
 	case ROW_THEME: theme_open(); break;
@@ -527,7 +600,7 @@ int main(int argc, char **argv)
 	if (!strcmp(open, "wifi"))
 		wifi_open(quit);
 	else if (!strcmp(open, "display"))
-		display_screen();
+		display_screen(DS_LEVEL);
 	else if (!strcmp(open, "keylight"))
 		keylight_screen(KL_MODE);
 	else if (!strcmp(open, "sound"))

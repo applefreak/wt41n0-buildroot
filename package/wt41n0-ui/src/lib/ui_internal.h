@@ -34,6 +34,11 @@ int platform_vt_activate(int vt);
 void keylight_load(void);
 void keylight_activity(void);
 void keylight_tick(void);
+/* Screen backlight (ui_screenlight.c): dim and off after inactivity. activity() returns
+ * true when the screen was off: the caller then drops that key or touch */
+void screenlight_load(void);
+bool screenlight_activity(void);
+void screenlight_tick(void);
 
 /* Benchmark counters (platform_linux.c), for WT41N0_UI_BENCH */
 struct bench_stats {

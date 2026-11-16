@@ -101,7 +101,8 @@ the Power app. Easier ways in:
 
 The launcher's settings live in `/etc/wt41n0/ui.conf` (`style=`, `palette=`,
 `accent=`, where palette and accent can be `auto` for the style's defaults; also
-`brightness=`, `volume=`, `tz=`, `input=`, `touch_cal=`). Apps are listed by the manifests
+`brightness=`, `screen_dim=`, `screen_off=`, `keylight_mode=`, `keylight=`,
+`keylight_timeout=`, `volume=`, `tz=`, `input=`, `touch_cal=`). Apps are listed by the manifests
 in `/usr/share/wt41n0/apps`.
 
 ## Customize

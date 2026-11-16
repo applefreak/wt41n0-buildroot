@@ -307,6 +307,9 @@ static void input_init(void)
 	}
 }
 
+static int swallow_key = -1;		/* a key whose press woke the screen */
+static bool swallow_touch;
+
 static void read_input(int fd, int kind)
 {
 	struct input_event ev[16];
@@ -318,18 +321,32 @@ static void read_input(int fd, int kind)
 			if (kind == DEV_KEYS) {
 				if (ev[i].type == EV_KEY) {
 					keylight_activity();
+					/* the screen was off: this press only wakes it (and its release goes too) */
+					if (screenlight_activity() && ev[i].value == 1)
+						swallow_key = ev[i].code;
+					if ((int)ev[i].code == swallow_key) {
+						if (ev[i].value == 0)
+							swallow_key = -1;
+						continue;
+					}
 					keys_event(ev[i].code, ev[i].value);
 				}
 				continue;
 			}
-			if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH)
+			if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH) {
 				keylight_activity();
+				if (screenlight_activity() && ev[i].value == 1)
+					swallow_touch = true;	/* likewise for a touch, until it lifts */
+			}
 			if (ev[i].type == EV_ABS && ev[i].code == ABS_X)
 				touch.raw_x = ev[i].value;
 			else if (ev[i].type == EV_ABS && ev[i].code == ABS_Y)
 				touch.raw_y = ev[i].value;
-			else if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH)
-				touch.down = ev[i].value;
+			else if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH) {
+				if (!ev[i].value)
+					swallow_touch = false;
+				touch.down = ev[i].value && !swallow_touch;
+			}
 			else if (ev[i].type == EV_SYN && ev[i].code == SYN_REPORT)
 				touch_commit();
 		}
@@ -348,6 +365,7 @@ void platform_wait(uint32_t ms)
 	if (ms > 1000)
 		ms = 1000;
 	keylight_tick();
+	screenlight_tick();
 	if (poll(pfd, ndevs, ms) <= 0)
 		return;
 	for (i = 0; i < ndevs; i++)
@@ -421,8 +439,18 @@ int platform_wait_key(int timeout_ms, unsigned int *code, int *value)
 		while (next < have) {
 			struct input_event *e = &ev[next++];
 
-			if (e->type == EV_KEY)		/* a key, or the touch screen pressed */
+			if (e->type == EV_KEY) {	/* a key, or the touch screen pressed */
 				keylight_activity();
+				if (screenlight_activity() && e->value == 1 && devs[from].kind == DEV_KEYS) {
+					swallow_key = e->code;	/* only wakes the screen */
+					continue;
+				}
+				if ((int)e->code == swallow_key && devs[from].kind == DEV_KEYS) {
+					if (e->value == 0)
+						swallow_key = -1;
+					continue;
+				}
+			}
 			if (devs[from].kind == DEV_KEYS && e->type == EV_KEY) {
 				*code = e->code;
 				*value = e->value;
@@ -431,6 +459,7 @@ int platform_wait_key(int timeout_ms, unsigned int *code, int *value)
 		}
 		have = next = 0;
 		keylight_tick();
+		screenlight_tick();
 		for (i = 0; i < ndevs; i++) {
 			pfd[i].fd = devs[i].fd;
 			pfd[i].events = POLLIN;

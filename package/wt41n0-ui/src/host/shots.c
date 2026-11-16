@@ -206,6 +206,10 @@ static void style_pass(const char *st)
 	host_advance(2000);
 
 	settings("display");
+	host_advance(200);
+	shot("display");		/* the list: brightness, dim and off times */
+	host_key(KEY_ENTER);		/* BRIGHTNESS: its slider */
+	host_advance(200);
 	host_key(KEY_ENTER);		/* adjusting */
 	host_key(KEY_DOWN);
 	host_advance(200);

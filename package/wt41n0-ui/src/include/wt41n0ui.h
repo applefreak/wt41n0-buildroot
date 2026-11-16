@@ -219,6 +219,12 @@ void ui_on_power(void (*cb)(void));	/* the power button pressed (NULL: ignored) 
  * keylight=, keylight_timeout=); ui_keylight_apply() reloads and applies them */
 enum ui_keylight_mode { UI_KEYLIGHT_AUTO, UI_KEYLIGHT_ON, UI_KEYLIGHT_OFF };
 void ui_keylight_apply(void);
+/* Screen backlight: dimmed after screen_dim= seconds without input, off after
+ * screen_off= (ui.conf; 0 never); ui_screenlight_apply() reloads them and the level */
+void ui_screenlight_apply(void);
+int ui_screenlight_dim(void);		/* seconds, 0: never */
+int ui_screenlight_off(void);
+bool ui_screen_dark(void);
 enum ui_keylight_mode ui_keylight_mode(void);
 int ui_keylight_level(void);
 int ui_keylight_timeout(void);		/* seconds */
