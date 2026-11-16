@@ -131,7 +131,8 @@ lv_obj_t *ui_slider_card(lv_obj_t *content, const char *icon, const char *name, 
 lv_obj_t *ui_toggle_row(lv_obj_t *content, int y, const char *name, bool on,
 			void (*changed)(lv_obj_t *row, bool on));
 /* Button: wide (WT_BTN_WIDE_W x WT_BTN_WIDE_H, icon + label) or small (54 x 40, icon over
- * label). React with LV_EVENT_CLICKED; a disabled one stays focusable but should do nothing. */
+ * label); name NULL: the icon only. React with LV_EVENT_CLICKED; a disabled one stays
+ * focusable but should do nothing. */
 lv_obj_t *ui_button(lv_obj_t *content, int x, int y, int w, int h, const char *icon, const char *name);
 void ui_button_set_disabled(lv_obj_t *b, bool disabled);
 bool ui_button_disabled(lv_obj_t *b);

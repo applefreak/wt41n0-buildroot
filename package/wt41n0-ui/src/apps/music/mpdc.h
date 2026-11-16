@@ -35,6 +35,7 @@ void mpdc_toggle(void);				/* play / pause */
 void mpdc_next(void);
 void mpdc_prev(void);
 void mpdc_volume(int delta);
+void mpdc_set_volume(int v);			/* 0..100 */
 
 int mpdc_queue(struct mpdc_item *items, int max);
 void mpdc_play_pos(int pos);

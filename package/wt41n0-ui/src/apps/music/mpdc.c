@@ -107,6 +107,7 @@ void mpdc_toggle(void) { host.state = host.state == MPDC_PLAY ? MPDC_PAUSE : MPD
 void mpdc_next(void) { host.song_pos++; host.song_id++; }
 void mpdc_prev(void) { if (host.song_pos) { host.song_pos--; host.song_id--; } }
 void mpdc_volume(int delta) { host.volume = host.volume + delta < 0 ? 0 : host.volume + delta > 100 ? 100 : host.volume + delta; }
+void mpdc_set_volume(int v) { host.volume = v < 0 ? 0 : v > 100 ? 100 : v; }
 
 static const char *const host_songs[][3] = {
 	{ "Albums/Low Tide/01 Breakwater.flac", "Breakwater", "3:58" },
@@ -323,6 +324,14 @@ void mpdc_volume(int delta)
 	if (v < 0)
 		return;
 	v += delta;
+	mpd_run_set_volume(conn, (unsigned)(v < 0 ? 0 : v > 100 ? 100 : v));
+	check();
+}
+
+void mpdc_set_volume(int v)
+{
+	if (!get())
+		return;
 	mpd_run_set_volume(conn, (unsigned)(v < 0 ? 0 : v > 100 ? 100 : v));
 	check();
 }

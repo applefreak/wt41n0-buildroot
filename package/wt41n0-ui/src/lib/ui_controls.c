@@ -327,8 +327,10 @@ lv_obj_t *ui_button(lv_obj_t *content, int x, int y, int w, int h, const char *i
 	lv_obj_center(in);
 	if (icon)
 		ui_icon_color(ui_icon_sized(in, icon, stacked ? 14 : 18), p->text);
-	t = label(in, UI_ROLE_NAME, p->text, name);
-	(void)t;
+	if (name) {				/* NULL: the icon only */
+		t = label(in, UI_ROLE_NAME, p->text, name);
+		(void)t;
+	}
 	return b;
 }
 

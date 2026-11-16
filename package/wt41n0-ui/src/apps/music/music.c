@@ -2,9 +2,10 @@
  * Music: a client for MPD (/etc/mpd.conf, socket /run/mpd.socket).
  *
  * NOW PLAYING (the start screen): the song card (state, title, artist, album or
- * station, progress, volume), then PREV / PLAY / NEXT / VOL- / VOL+, then QUEUE,
- * LIBRARY and RADIO. Number keys reach them directly: 4 5 6 previous / play-pause /
- * next, 7 8 volume down / up, 1 2 3 the other screens. The state is polled every 500 ms.
+ * station, progress, volume), then PREV / PLAY / NEXT, then QUEUE, LIBRARY, RADIO and
+ * VOLUME (a slider). Number keys reach them directly: 4 5 6 previous / play-pause /
+ * next, 1 2 3 the other screens, 9 the volume slider; 7 8 turn the volume down / up
+ * without leaving the screen. The state is polled every 500 ms.
  *
  * QUEUE: the play queue, the current song tagged; ENT plays one, BKSP removes it.
  * LIBRARY: the folders of /root/Music; ENT on a folder opens it, on a song plays the
@@ -25,8 +26,11 @@
 #define CARD_H		104
 #define ROW1_Y		(WT_INNER_Y + CARD_H + 6)
 #define ROW2_Y		(ROW1_Y + 40 + 6)
+#define ROW1_W		((WT_INNER_W - 2 * 8) / 3)	/* PREV PLAY NEXT */
+#define VOL_W		44				/* VOLUME: the icon only, the card shows the level */
+#define ROW2_W		((WT_INNER_W - VOL_W - 3 * 8) / 3)	/* QUEUE LIBRARY RADIO */
 
-enum { B_PREV, B_PLAY, B_NEXT, B_VOLDN, B_VOLUP, B_QUEUE, B_LIBRARY, B_RADIO, B_COUNT };
+enum { B_PREV, B_PLAY, B_NEXT, B_QUEUE, B_LIBRARY, B_RADIO, B_VOLUME, B_COUNT };
 
 static struct mpdc_status st;
 static struct mpdc_item items[MPDC_MAX_ITEMS];
@@ -46,6 +50,7 @@ static void now_screen(void);
 static void queue_screen(void);
 static void library_screen(void);
 static void radio_screen(void);
+static void volume_screen(void);
 
 /* ---- helpers ------------------------------------------------------------------------ */
 
@@ -106,6 +111,13 @@ static void play_button(bool playing)
 	lv_label_set_text(lv_obj_get_child(in, -1), playing ? "PAUSE" : "PLAY");
 }
 
+/* the VOLUME button is off without a mixer */
+static void volume_button(void)
+{
+	if (buttons[B_VOLUME])
+		ui_button_set_disabled(buttons[B_VOLUME], st.volume < 0);
+}
+
 static void show_status(void)
 {
 	static const char *const words[] = { "STOPPED", "PLAYING", "PAUSED" };
@@ -124,6 +136,8 @@ static void show_status(void)
 		lv_label_set_text(vol_l, "");
 		lv_bar_set_value(bar, 0, LV_ANIM_OFF);
 		play_button(false);
+		st.volume = -1;
+		volume_button();
 		return;
 	}
 	lv_label_set_text(state_l, words[st.state]);
@@ -162,6 +176,7 @@ static void show_status(void)
 		snprintf(buf, sizeof(buf), "%s%s", st.repeat ? "RPT" : "", st.random ? "  RND" : "");
 	lv_label_set_text(vol_l, buf);
 	play_button(st.state == MPDC_PLAY);
+	volume_button();
 }
 
 static void poll_cb(lv_timer_t *t)
@@ -183,11 +198,10 @@ static void act(int b)
 	case B_PREV:	mpdc_prev(); break;
 	case B_PLAY:	mpdc_toggle(); break;
 	case B_NEXT:	mpdc_next(); break;
-	case B_VOLDN:	mpdc_volume(-VOL_STEP); break;
-	case B_VOLUP:	mpdc_volume(VOL_STEP); break;
 	case B_QUEUE:	list_focus = st.song_pos > 0 ? st.song_pos : 0; queue_screen(); return;
 	case B_LIBRARY:	path[0] = 0; list_focus = 0; library_screen(); return;
 	case B_RADIO:	list_focus = 0; radio_screen(); return;
+	case B_VOLUME:	if (!ui_button_disabled(buttons[B_VOLUME])) volume_screen(); return;
 	}
 	refresh();
 }
@@ -195,7 +209,7 @@ static void act(int b)
 static void button_event(lv_event_t *e)
 {
 	int b = (int)(intptr_t)lv_event_get_user_data(e);
-	static const char keys[] = "456781" "23";	/* B_PREV..B_RADIO */
+	static const char keys[] = "456" "123" "9";	/* B_PREV..B_VOLUME */
 
 	switch (lv_event_get_code(e)) {
 	case LV_EVENT_FOCUSED:
@@ -208,7 +222,10 @@ static void button_event(lv_event_t *e)
 		uint32_t k = lv_event_get_key(e);
 		const char *at = k < 128 ? strchr(keys, (int)k) : NULL;
 
-		if (at && k) {
+		if (k == '7' || k == '8') {	/* volume, from any button */
+			mpdc_volume(k == '7' ? -VOL_STEP : VOL_STEP);
+			refresh();
+		} else if (at && k) {
 			now_focus = (int)(at - keys);
 			lv_group_focus_obj(buttons[now_focus]);
 			act(now_focus);
@@ -229,8 +246,8 @@ static void now_deleted(lv_event_t *e)
 
 static void now_screen(void)
 {
-	static const char *const icons[B_COUNT] = { "prev", "play", "next", "minus", "plus", "list", "folder", "audio" };
-	static const char *const names[B_COUNT] = { "PREV", "PLAY", "NEXT", "VOL-", "VOL+", "QUEUE", "LIBRARY", "RADIO" };
+	static const char *const icons[B_COUNT] = { "prev", "play", "next", NULL, NULL, NULL, "volume" };
+	static const char *const names[B_COUNT] = { "PREV", "PLAY", "NEXT", "QUEUE", "LIBRARY", "RADIO", NULL };
 	const ui_palette_t *p = ui_palette();
 	lv_obj_t *c, *card, *col;
 	int i, x;
@@ -276,10 +293,12 @@ static void now_screen(void)
 	time_l = text(card, UI_ROLE_DATA, p->dim, "");
 	lv_obj_align(time_l, LV_ALIGN_BOTTOM_RIGHT, -9, -5);
 
-	for (i = 0, x = WT_INNER_X; i <= B_VOLUP; i++, x += 54 + 8)
-		buttons[i] = ui_button(c, x, ROW1_Y, 54, 40, icons[i], names[i]);
-	for (i = B_QUEUE, x = WT_INNER_X; i < B_COUNT; i++, x += 96 + 8)
-		buttons[i] = ui_button(c, x, ROW2_Y, 96, 32, icons[i], names[i]);
+	/* the transport row, then the other screens with the volume last */
+	for (i = 0, x = WT_INNER_X; i <= B_NEXT; i++, x += ROW1_W + 8)
+		buttons[i] = ui_button(c, x, ROW1_Y, ROW1_W, 40, icons[i], names[i]);
+	for (i = B_QUEUE, x = WT_INNER_X; i < B_VOLUME; i++, x += ROW2_W + 8)
+		buttons[i] = ui_button(c, x, ROW2_Y, ROW2_W, 32, icons[i], names[i]);
+	buttons[B_VOLUME] = ui_button(c, WT_INNER_X + WT_INNER_W - VOL_W, ROW2_Y, VOL_W, 32, icons[B_VOLUME], NULL);
 	for (i = 0; i < B_COUNT; i++)
 		lv_obj_add_event_cb(buttons[i], button_event, LV_EVENT_ALL, (void *)(intptr_t)i);
 	lv_group_focus_obj(buttons[now_focus]);
@@ -289,6 +308,29 @@ static void now_screen(void)
 static void back_to_now(void)
 {
 	now_screen();
+}
+
+/* ---- VOLUME ----------------------------------------------------------------------------- */
+
+static void back_from_volume(void)
+{
+	now_focus = B_VOLUME;
+	now_screen();
+}
+
+static void volume_changed(int v)
+{
+	mpdc_set_volume(v);
+}
+
+static void volume_screen(void)
+{
+	lv_obj_t *c = ui_screen("MUSIC/VOLUME");
+	int v = st.volume < 0 ? 0 : st.volume;
+
+	ui_on_back(back_from_volume);
+	v = (v + WT_SLIDER_STEP / 2) / WT_SLIDER_STEP * WT_SLIDER_STEP;
+	lv_group_focus_obj(ui_slider_card(c, "volume", "VOLUME", "%", 0, 100, v, volume_changed));
 }
 
 /* ---- QUEUE ---------------------------------------------------------------------------- */

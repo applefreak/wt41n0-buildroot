@@ -274,6 +274,16 @@ static void style_pass(const char *st)
 	music_main();
 	host_advance(300);
 	shot("music");
+	host_key(KEY_1 + 8);		/* 9: VOLUME */
+	host_advance(300);
+	host_key(KEY_ENTER);		/* adjusting */
+	host_key(KEY_UP);
+	host_advance(200);
+	shot("music-volume");
+	host_key(KEY_ENTER);		/* set */
+	host_key(KEY_ESC);		/* back, with VOLUME focused */
+	host_advance(300);
+	shot("music-volume-back");
 	host_key(KEY_1 + 2);		/* 3: RADIO */
 	host_advance(300);
 	shot("music-radio");
